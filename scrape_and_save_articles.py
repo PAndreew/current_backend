@@ -9,9 +9,13 @@ from supabase import create_client, Client
 from google.cloud import tasks_v2
 import json
 
-# Initialize Supabase client
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT")
+bucket_name = os.getenv("GCS_BUCKET_NAME", "news_audio_bucket")  # Default if not set
+url = os.getenv("AUDIO_GENERATION_FUNCTION_URL")
+
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # List of RSS Feeds
@@ -73,7 +77,7 @@ def schedule_audio_task(article_data):
     project = os.getenv("GOOGLE_CLOUD_PROJECT")
     queue = "audio-generation-queue"
     location = "us-central1"
-    url = "https://REGION-PROJECT_ID.cloudfunctions.net/generate_audio_for_article"  # Replace REGION-PROJECT_ID
+    url = "https://europe-west1-currentlyai.cloudfunctions.net/generate_audio_for_article"  # Replace REGION-PROJECT_ID
     payload = {"article_id": article_data['link']}  # Use 'link' or 'id' if Supabase returns an ID
 
     parent = client.queue_path(project, location, queue)
