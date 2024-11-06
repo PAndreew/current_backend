@@ -40,7 +40,7 @@ def scrape_and_save_articles(request):
 
         for entry in feed.entries:
             # Check if the article already exists in the Supabase database
-            response = supabase.table("articles").select("*").eq("link", entry.link).execute()
+            response = supabase.table("article").select("*").eq("link", entry.link).execute()
             existing_article = response.data
 
             if not existing_article:
@@ -53,7 +53,7 @@ def scrape_and_save_articles(request):
                     "link": entry.link,
                     "category": entry.get("category", "Uncategorized")
                 }
-                supabase.table("articles").insert(article_data).execute()
+                supabase.table("article").insert(article_data).execute()
                 logging.info(f"New article saved: {entry.title}")
 
                 # Schedule audio generation task
