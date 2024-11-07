@@ -42,13 +42,11 @@ def scrape_and_save_articles(request):
         feed = feedparser.parse(url)
         new_article_found = False
 
-        for entry in feed.entries:
-            # Check if the article already exists in the Supabase database
+        for entry in feed.entries[:1]:
             response = supabase.table("article").select("*").eq("link", entry.link).execute()
             existing_article = response.data
 
             if not existing_article:
-                # Save the newest article to the Supabase database
                 pub_date = parse_pub_date(entry)
                 article_data = {
                     "title": entry.title,
@@ -57,13 +55,17 @@ def scrape_and_save_articles(request):
                     "link": entry.link,
                     "category": entry.get("category", "Uncategorized")
                 }
-                supabase.table("article").insert(article_data).execute()
-                logging.info(f"New article saved: {entry.title}")
+                
+                # Insert article and get the response with ID
+                insert_response = supabase.table("article").insert(article_data).execute()
+                new_article_id = insert_response.data[0]['id']  # Extract the ID from the response
+                
+                logging.info(f"New article saved with ID {new_article_id}: {entry.title}")
 
-                # Schedule audio generation task
-                schedule_audio_task(article_data)
+                # Schedule audio generation task with the ID
+                schedule_audio_task(new_article_id)
                 new_article_found = True
-                break  # Stop after saving the first new article
+                break
             else:
                 logging.info(f"Article already exists in database: {entry.title}")
 
@@ -72,13 +74,13 @@ def scrape_and_save_articles(request):
 
     return "RSS scraping complete", 200
 
-def schedule_audio_task(article_data):
+def schedule_audio_task(article_id):
     client = tasks_v2.CloudTasksClient()
     project = os.getenv("GOOGLE_CLOUD_PROJECT")
     queue = "audio-generation-queue"
     location = "us-central1"
-    url = "https://europe-west1-currentlyai.cloudfunctions.net/generate_audio_for_article"  # Replace REGION-PROJECT_ID
-    payload = {"article_id": article_data['link']}  # Use 'link' or 'id' if Supabase returns an ID
+    url = "https://us-central1-currentlyai.cloudfunctions.net/generate_audio_for_article"
+    payload = {"article_id": article_id}  # Send the integer ID instead of the link
 
     parent = client.queue_path(project, location, queue)
 

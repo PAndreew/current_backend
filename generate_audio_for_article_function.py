@@ -1,17 +1,45 @@
 import logging
 import os
-import requests
-from google.cloud import storage
+from io import BytesIO
 from supabase import create_client, Client
+from google.cloud import storage
+from elevenlabs import ElevenLabs, VoiceSettings
 
+# Initialize Supabase and ElevenLabs clients
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
-GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT")
-bucket_name = os.getenv("GCS_BUCKET_NAME", "news_audio_bucket")  # Default if not set
-url = os.getenv("AUDIO_GENERATION_FUNCTION_URL")
+bucket_name = os.getenv("GCS_BUCKET_NAME", "news_audio_bucket")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
+
+def text_to_speech_stream(text: str) -> BytesIO:
+    # Perform the text-to-speech conversion with ElevenLabs
+    response = client.text_to_speech.convert(
+        voice_id="Xb7hH8MSUJpSbSDYk0k2",  # Replace with actual voice ID
+        output_format="mp3_22050_32",
+        text=text,
+        model_id="eleven_turbo_v2_5",
+        voice_settings=VoiceSettings(
+            stability=0.0,
+            similarity_boost=1.0,
+            style=0.0,
+            use_speaker_boost=True,
+        ),
+    )
+
+    # Create a BytesIO object to hold the audio data in memory
+    audio_stream = BytesIO()
+
+    # Write each chunk of audio data to the stream
+    for chunk in response:
+        if chunk:
+            audio_stream.write(chunk)
+
+    # Reset stream position to the beginning
+    audio_stream.seek(0)
+    return audio_stream
 
 def generate_audio_for_article(request):
     request_json = request.get_json()
@@ -22,50 +50,32 @@ def generate_audio_for_article(request):
         return "Article ID missing", 400
 
     # Fetch the article from Supabase
-    response = supabase.table("articles").select("*").eq("id", article_id).execute()
+    response = supabase.table("article").select("*").eq("id", article_id).execute()
     article_data = response.data
 
     if not article_data:
         logging.error(f"Article with ID {article_id} not found")
         return "Article not found", 404
 
-    # Use the first (and should be only) entry in response data
     article = article_data[0]
 
-    # Generate audio content using ElevenLabs API
-    headers = {
-        "xi-api-key": ELEVENLABS_API_KEY,
-        "Content-Type": "application/json"
-    }
-    tts_payload = {
-        "text": article['description'],
-        "voice_settings": {
-            "voice": "Rachel",  # Replace with the voice ID or name you wish to use
-            "stability": 0.75,
-            "similarity_boost": 0.85
-        }
-    }
-    
-    tts_url = "https://api.elevenlabs.io/v1/text-to-speech"  # Base URL for ElevenLabs API
-    response = requests.post(tts_url, headers=headers, json=tts_payload)
+    # Generate audio content using streaming from ElevenLabs API
+    audio_stream = text_to_speech_stream(article['description'])
 
-    if response.status_code != 200:
-        logging.error(f"ElevenLabs API error: {response.status_code} - {response.text}")
-        return "Error generating audio", 500
-
-    # Save audio to Google Cloud Storage
+    # Upload the audio stream directly to Google Cloud Storage
     storage_client = storage.Client()
     bucket = storage_client.bucket(bucket_name)
-    blob = bucket.blob(f"audio/{article_id}.mp3")
-    blob.upload_from_string(response.content, content_type="audio/mp3")
-    audio_url = f"gs://{bucket_name}/audio/{article_id}.mp3"
+    filename = f"audios/{article['title']}.mp3"
+    blob = bucket.blob(filename)
+    blob.upload_from_file(audio_stream, content_type="audio/mpeg")
+    audio_url = f"https://storage.googleapis.com/{bucket_name}/{filename}"
 
     # Store the audio URL in Supabase
     audio_data = {
         "article_id": article_id,
         "audio_url": audio_url
     }
-    supabase.table("audio_files").insert(audio_data).execute()
+    supabase.table("audio_file").insert(audio_data).execute()
 
     logging.info(f"Audio file saved for article ID {article_id}: {audio_url}")
     return "Audio file generated and saved", 200
