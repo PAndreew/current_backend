@@ -1,5 +1,6 @@
 import logging
 import os
+import random
 from io import BytesIO
 from supabase import create_client, Client
 from google.cloud import storage
@@ -14,11 +15,12 @@ bucket_name = os.getenv("GCS_BUCKET_NAME", "news_audio_bucket")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
+audio_ids = ("JBFqnCBsd6RMkjVDRZzb", "CwhRBWXzGAHq8TQ4Fs17")
 
 def text_to_speech_stream(text: str) -> BytesIO:
     # Perform the text-to-speech conversion with ElevenLabs
     response = client.text_to_speech.convert(
-        voice_id="CwhRBWXzGAHq8TQ4Fs17",  # Replace with actual voice ID
+        voice_id=random.choice(audio_ids),  # Replace with actual voice ID
         output_format="mp3_22050_32",
         text=text,
         model_id="eleven_turbo_v2_5",
