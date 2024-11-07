@@ -3,7 +3,8 @@ import os
 from io import BytesIO
 from supabase import create_client, Client
 from google.cloud import storage
-from elevenlabs import ElevenLabs, VoiceSettings
+from elevenlabs import VoiceSettings
+from elevenlabs.client import ElevenLabs
 
 # Initialize Supabase and ElevenLabs clients
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
@@ -17,7 +18,7 @@ client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
 def text_to_speech_stream(text: str) -> BytesIO:
     # Perform the text-to-speech conversion with ElevenLabs
     response = client.text_to_speech.convert(
-        voice_id="Xb7hH8MSUJpSbSDYk0k2",  # Replace with actual voice ID
+        voice_id="CwhRBWXzGAHq8TQ4Fs17",  # Replace with actual voice ID
         output_format="mp3_22050_32",
         text=text,
         model_id="eleven_turbo_v2_5",
@@ -59,8 +60,10 @@ def generate_audio_for_article(request):
 
     article = article_data[0]
 
+    text_content = f"{article['title']}. {article['description']}"
+
     # Generate audio content using streaming from ElevenLabs API
-    audio_stream = text_to_speech_stream(article['description'])
+    audio_stream = text_to_speech_stream(text_content)
 
     # Upload the audio stream directly to Google Cloud Storage
     storage_client = storage.Client()
