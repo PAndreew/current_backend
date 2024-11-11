@@ -8,21 +8,37 @@ import logging
 from supabase import create_client, Client
 from google.cloud import tasks_v2
 import json
+from openai import OpenAI
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT")
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 bucket_name = os.getenv("GCS_BUCKET_NAME", "news_audio_bucket")  # Default if not set
 url = os.getenv("AUDIO_GENERATION_FUNCTION_URL")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+client = OpenAI()
 
 # List of RSS Feeds
 RSS_FEEDS = [
     'https://www.portfolio.hu/rss/all.xml',
     'https://index.hu/24ora/rss/'
 ]
+
+def clean_text(text: str) -> str:
+    completion = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You are an HTML cleaner."},
+            {
+                "role": "user",
+                "content": f"Clean the following data by removing unnecessary characters, typos and by converting numbers to words: '{text}'. Return the processed text."
+            }
+        ]
+    )
+    return completion.choices[0].message.content
 
 def parse_pub_date(entry) -> datetime:
     """Parse the published date from an RSS entry."""
@@ -48,9 +64,10 @@ def scrape_and_save_articles(request):
 
             if not existing_article:
                 pub_date = parse_pub_date(entry)
+                processed_text = clean_text(entry.description)
                 article_data = {
                     "title": entry.title,
-                    "description": entry.description,
+                    "description": processed_text,
                     "pub_date": pub_date.isoformat(),
                     "link": entry.link,
                     "category": entry.get("category", "Uncategorized")

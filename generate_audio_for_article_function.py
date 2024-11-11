@@ -6,6 +6,7 @@ from supabase import create_client, Client
 from google.cloud import storage
 from elevenlabs import VoiceSettings
 from elevenlabs.client import ElevenLabs
+from pydub import AudioSegment
 
 # Initialize Supabase and ElevenLabs clients
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
@@ -15,7 +16,7 @@ bucket_name = os.getenv("GCS_BUCKET_NAME", "news_audio_bucket")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
-audio_ids = ("JBFqnCBsd6RMkjVDRZzb", "CwhRBWXzGAHq8TQ4Fs17")
+audio_ids = ("lVCldLIMCFckDUbGfwtx", "lVCldLIMCFckDUbGfwtx")
 
 def text_to_speech_stream(text: str) -> BytesIO:
     # Perform the text-to-speech conversion with ElevenLabs
@@ -61,7 +62,6 @@ def generate_audio_for_article(request):
         return "Article not found", 404
 
     article = article_data[0]
-
     text_content = f"{article['title']}. {article['description']}"
 
     # Generate audio content using streaming from ElevenLabs API
@@ -75,10 +75,23 @@ def generate_audio_for_article(request):
     blob.upload_from_file(audio_stream, content_type="audio/mpeg")
     audio_url = f"https://storage.googleapis.com/{bucket_name}/{filename}"
 
-    # Store the audio URL in Supabase
+    # Calculate length in bytes
+    blob.reload()  # Refresh blob metadata to get the updated size after upload
+    file_length_bytes = blob.size  # File size in bytes
+
+    # Calculate duration in minutes using pydub
+    # Download the file temporarily to calculate its duration
+    temp_audio_file = f"/tmp/{article['title']}.mp3"
+    blob.download_to_filename(temp_audio_file)
+    audio = AudioSegment.from_file(temp_audio_file)
+    duration_minutes = audio.duration_seconds / 60  # Duration in minutes
+
+    # Store the audio URL, length, and duration in Supabase
     audio_data = {
         "article_id": article_id,
-        "audio_url": audio_url
+        "audio_url": audio_url,
+        "length": file_length_bytes,
+        "duration": round(duration_minutes, 2)  # Round to 2 decimal places for readability
     }
     supabase.table("audio_file").insert(audio_data).execute()
 
