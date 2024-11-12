@@ -1,0 +1,46 @@
+name: Deploy to Google Cloud Functions
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy to Google Cloud Functions
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Checkout the repository
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      # Step 2: Set up Google Cloud SDK
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          service_account_key: ${{ secrets.GOOGLE_CREDENTIALS }}
+          export_default_credentials: true
+
+      # Step 3: Deploy scrape_and_save_articles function
+      - name: Deploy scrape_and_save_articles Function
+        run: |
+          gcloud functions deploy scrape_and_save_articles \
+            --runtime python310 \
+            --trigger-http \
+            --allow-unauthenticated \
+            --region YOUR_REGION \
+            --source ./current_backend \
+            --entry-point scrape_and_save_articles
+
+      # Step 4: Deploy generate_audio_file function
+      - name: Deploy generate_audio_file Function
+        run: |
+          gcloud functions deploy generate_audio_file \
+            --runtime python310 \
+            --trigger-http \
+            --allow-unauthenticated \
+            --region YOUR_REGION \
+            --source ./current_backend \
+            --entry-point generate_audio_file
