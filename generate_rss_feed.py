@@ -2,6 +2,7 @@ from supabase import create_client, Client
 import xml.etree.ElementTree as ET
 from google.cloud import pubsub_v1, storage
 from datetime import datetime
+import json
 
 # Initialize Supabase client
 SUPABASE_URL=r"https://uhhdiibmeitulvkbpwud.supabase.co"
