@@ -6,7 +6,7 @@ from dateutil import parser as date_parser
 from datetime import datetime
 import logging
 from supabase import create_client, Client
-from google.cloud import tasks_v2
+from google.cloud import pubsub_v1
 import json
 from openai import OpenAI
 
@@ -53,61 +53,43 @@ def parse_pub_date(entry) -> datetime:
     return datetime.now()
 
 def scrape_and_save_articles(request):
+    publisher = pubsub_v1.PublisherClient()
+    topic_path = publisher.topic_path("currentlyai", "articles-saved")
+
     for url in RSS_FEEDS:
         logging.info(f"Scraping RSS feed: {url}")
         feed = feedparser.parse(url)
-        new_article_found = False
 
         for entry in feed.entries[:1]:
+            # Check if article exists
             response = supabase.table("article").select("*").eq("link", entry.link).execute()
-            existing_article = response.data
-
-            if not existing_article:
-                pub_date = parse_pub_date(entry)
-                processed_text = clean_text(entry.description)
-                article_data = {
-                    "title": entry.title,
-                    "description": processed_text,
-                    "pub_date": pub_date.isoformat(),
-                    "link": entry.link,
-                    "category": entry.get("category", "Uncategorized")
-                }
-                
-                # Insert article and get the response with ID
-                insert_response = supabase.table("article").insert(article_data).execute()
-                new_article_id = insert_response.data[0]['id']  # Extract the ID from the response
-                
-                logging.info(f"New article saved with ID {new_article_id}: {entry.title}")
-
-                # Schedule audio generation task with the ID
-                schedule_audio_task(new_article_id)
-                new_article_found = True
-                break
-            else:
+            if response.data:
                 logging.info(f"Article already exists in database: {entry.title}")
+                continue
 
-        if not new_article_found:
-            logging.info("No new articles found in this feed.")
+            # Process and save new article
+            pub_date = parse_pub_date(entry)
+            processed_text = clean_text(entry.description)
+            article_data = {
+                "title": entry.title,
+                "description": processed_text,
+                "pub_date": pub_date.isoformat(),
+                "link": entry.link,
+                "category": entry.get("category", "Uncategorized")
+            }
+            insert_response = supabase.table("article").insert(article_data).execute()
+            article_id = insert_response.data[0]['id']
+
+            logging.info(f"New article saved with ID {article_id}: {entry.title}")
+
+            # Publish to Pub/Sub for audio generation
+            article_message = {
+                "article_id": article_id,
+                "title": entry.title,
+                "description": processed_text,
+                "pub_date": pub_date.isoformat(),
+                "link": entry.link
+            }
+            publisher.publish(topic_path, json.dumps(article_message).encode("utf-8"))
 
     return "RSS scraping complete", 200
-
-def schedule_audio_task(article_id):
-    client = tasks_v2.CloudTasksClient()
-    project = os.getenv("GOOGLE_CLOUD_PROJECT")
-    queue = "audio-generation-queue"
-    location = "us-central1"
-    url = "https://us-central1-currentlyai.cloudfunctions.net/generate_audio_for_article"
-    payload = {"article_id": article_id}  # Send the integer ID instead of the link
-
-    parent = client.queue_path(project, location, queue)
-
-    task = {
-        "http_request": {
-            "http_method": tasks_v2.HttpMethod.POST,
-            "url": url,
-            "headers": {"Content-Type": "application/json"},
-            "body": json.dumps(payload).encode(),
-        }
-    }
-
-    client.create_task(parent=parent, task=task)
