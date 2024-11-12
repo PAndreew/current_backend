@@ -3,7 +3,7 @@ name: Deploy to Google Cloud Functions
 on:
   push:
     branches:
-      - main
+      - master
 
 jobs:
   deploy:
@@ -30,7 +30,6 @@ jobs:
             --runtime python310 \
             --trigger-http \
             --allow-unauthenticated \
-            --region YOUR_REGION \
             --source ./current_backend \
             --entry-point scrape_and_save_articles
 
@@ -41,6 +40,5 @@ jobs:
             --runtime python310 \
             --trigger-http \
             --allow-unauthenticated \
-            --region YOUR_REGION \
             --source ./current_backend \
             --entry-point generate_audio_file
