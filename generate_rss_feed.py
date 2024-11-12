@@ -84,8 +84,8 @@ def generate_rss_feed(event, context):
 
         # Enclosure with URL, type, and length from audio_file
         if "audio_file" in episode:
-            audio_url = episode["audio_file"]["audio_url"]
-            audio_length = episode["audio_file"]["length"]
+            audio_url = episode["audio_file"][0]["audio_url"]
+            audio_length = episode["audio_file"][0]["length"]
             ET.SubElement(item, "enclosure", url=audio_url, type="audio/mpeg", length=str(audio_length))
 
         # GUID and publication date
