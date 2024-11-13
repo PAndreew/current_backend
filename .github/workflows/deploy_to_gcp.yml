@@ -31,14 +31,24 @@ jobs:
             --trigger-http \
             --allow-unauthenticated \
             --source ./current_backend \
-            --entry-point scrape_and_save_articles
+            --entry-point generate_audio_file
 
       # Step 4: Deploy generate_audio_file function
       - name: Deploy generate_audio_file Function
         run: |
           gcloud functions deploy generate_audio_file \
             --runtime python310 \
-            --trigger-http \
+            --trigger-topic articles-saved \
             --allow-unauthenticated \
             --source ./current_backend \
             --entry-point generate_audio_file
+
+      # Step 5: Deploy generate_rss_feed function
+      - name: Deploy generate_rss_feed Function
+        run: |
+          gcloud functions deploy generate_rss_feed \
+            --runtime python310 \
+            --trigger-topic audio-generated \
+            --allow-unauthenticated \
+            --source ./current_backend \
+            --entry-point generate_rss_feed  

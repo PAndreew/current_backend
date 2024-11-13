@@ -3,7 +3,7 @@ import os
 import random
 from io import BytesIO
 from supabase import create_client, Client
-from google.cloud import storage
+from google.cloud import storage, pubsub_v1
 from elevenlabs import VoiceSettings
 from elevenlabs.client import ElevenLabs
 from pydub import AudioSegment
@@ -45,55 +45,57 @@ def text_to_speech_stream(text: str) -> BytesIO:
     audio_stream.seek(0)
     return audio_stream
 
-def generate_audio_for_article(request):
-    request_json = request.get_json()
-    article_id = request_json.get("article_id")
+def generate_audio_for_article(event, context):
+    subscriber = pubsub_v1.SubscriberClient()
+    publisher = pubsub_v1.PublisherClient()
+    topic_path = publisher.topic_path("your_project_id", "audio-generated")
     
-    if not article_id:
-        logging.error("Article ID not provided in the request.")
-        return "Article ID missing", 400
+    article_data = json.loads(event['data'].decode("utf-8"))
+    article_id = article_data["article_id"]
+    
+    # Generate audio content
+    try:
+        text_content = f"{article_data['title']}. {article_data['description']}"
+        audio_stream = text_to_speech_stream(text_content)  # Audio generation logic
 
-    # Fetch the article from Supabase
-    response = supabase.table("article").select("*").eq("id", article_id).execute()
-    article_data = response.data
+        # Upload audio to GCS
+        storage_client = storage.Client()
+        bucket = storage_client.bucket("your_bucket_name")
+        filename = f"audios/{article_data['title']}.mp3"
+        blob = bucket.blob(filename)
+        blob.upload_from_file(audio_stream, content_type="audio/mpeg")
+        audio_url = f"https://storage.googleapis.com/{bucket.name}/{filename}"
 
-    if not article_data:
-        logging.error(f"Article with ID {article_id} not found")
-        return "Article not found", 404
+        # Calculate duration and size
+        blob.reload()
+        file_length_bytes = blob.size
+        temp_audio_file = f"/tmp/{article_data['title']}.mp3"
+        blob.download_to_filename(temp_audio_file)
+        audio = AudioSegment.from_file(temp_audio_file)
+        duration_minutes = audio.duration_seconds / 60
 
-    article = article_data[0]
-    text_content = f"{article['title']}. {article['description']}"
+        # Save audio data to the database
+        audio_data = {
+            "article_id": article_id,
+            "audio_url": audio_url,
+            "length": file_length_bytes,
+            "duration": round(duration_minutes, 2)
+        }
+        supabase.table("audio_file").insert(audio_data).execute()
 
-    # Generate audio content using streaming from ElevenLabs API
-    audio_stream = text_to_speech_stream(text_content)
+        # Publish to `audio-generated` Pub/Sub topic
+        audio_message = {
+            "article_id": article_id,
+            "audio_url": audio_url,
+            "length": file_length_bytes,
+            "duration": round(duration_minutes, 2)
+        }
+        publisher.publish(topic_path, json.dumps(audio_message).encode("utf-8"))
+        
+        logging.info(f"Audio generated for article ID {article_id}")
 
-    # Upload the audio stream directly to Google Cloud Storage
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(bucket_name)
-    filename = f"audios/{article['title']}.mp3"
-    blob = bucket.blob(filename)
-    blob.upload_from_file(audio_stream, content_type="audio/mpeg")
-    audio_url = f"https://storage.googleapis.com/{bucket_name}/{filename}"
+    except Exception as e:
+        logging.error(f"Error generating audio for article {article_id}: {e}")
+        return "Audio generation failed", 500
 
-    # Calculate length in bytes
-    blob.reload()  # Refresh blob metadata to get the updated size after upload
-    file_length_bytes = blob.size  # File size in bytes
-
-    # Calculate duration in minutes using pydub
-    # Download the file temporarily to calculate its duration
-    temp_audio_file = f"/tmp/{article['title']}.mp3"
-    blob.download_to_filename(temp_audio_file)
-    audio = AudioSegment.from_file(temp_audio_file)
-    duration_minutes = audio.duration_seconds / 60  # Duration in minutes
-
-    # Store the audio URL, length, and duration in Supabase
-    audio_data = {
-        "article_id": article_id,
-        "audio_url": audio_url,
-        "length": file_length_bytes,
-        "duration": round(duration_minutes, 2)  # Round to 2 decimal places for readability
-    }
-    supabase.table("audio_file").insert(audio_data).execute()
-
-    logging.info(f"Audio file saved for article ID {article_id}: {audio_url}")
-    return "Audio file generated and saved", 200
+    return "Audio generated and saved", 200

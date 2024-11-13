@@ -1,2 +1,3 @@
 from generate_audio_for_article_function import generate_audio_for_article
 from scrape_and_save_articles import scrape_and_save_articles
+from generate_rss_feed import generate_rss_feed
