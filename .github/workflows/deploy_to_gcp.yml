@@ -34,7 +34,7 @@ jobs:
             --runtime python310 \
             --trigger-http \
             --allow-unauthenticated \
-            --source ./current_backend \
+            --source . \
             --entry-point scrape_and_save_articles
 
       # Step 5: Deploy generate_audio_file function
@@ -44,7 +44,7 @@ jobs:
             --runtime python310 \
             --trigger-topic articles-saved \
             --allow-unauthenticated \
-            --source ./current_backend \
+            --source . \
             --entry-point generate_audio_for_article
 
       # Step 6: Deploy generate_rss_feed function
@@ -54,5 +54,5 @@ jobs:
             --runtime python310 \
             --trigger-topic audio-generated \
             --allow-unauthenticated \
-            --source ./current_backend \
+            --source . \
             --entry-point generate_rss_feed
