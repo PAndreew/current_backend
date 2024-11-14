@@ -35,9 +35,11 @@ def fetch_episodes_with_audio():
         return []
 
 def generate_rss_feed(event, context):
+    # Decode the Pub/Sub message
     decoded_data = base64.b64decode(event['data']).decode("utf-8")
     message_data = json.loads(decoded_data)
     
+    # Fetch podcast and episode data from Supabase
     podcast_info = fetch_podcast_info('76f55288-cd16-4b2c-892a-89e1aeac5b27')
     if not podcast_info:
         logging.error("Missing podcast data; RSS feed generation aborted.")
@@ -48,7 +50,17 @@ def generate_rss_feed(event, context):
         logging.info("No episodes found; RSS feed generation aborted.")
         return
 
-    rss = ET.Element("rss", version="2.0")
+    # Start generating the RSS feed with namespaces
+    namespaces = {
+        "itunes": "http://www.itunes.com/dtds/podcast-1.0.dtd",
+        "atom": "http://www.w3.org/2005/Atom"
+    }
+    rss = ET.Element("rss", version="2.0", nsmap=namespaces)
+    
+    # Register namespaces explicitly
+    ET.register_namespace("itunes", "http://www.itunes.com/dtds/podcast-1.0.dtd")
+    ET.register_namespace("atom", "http://www.w3.org/2005/Atom")
+    
     channel = ET.SubElement(rss, "channel")
     
     # Podcast-level tags
@@ -56,39 +68,47 @@ def generate_rss_feed(event, context):
     ET.SubElement(channel, "link").text = html.escape(podcast_info["homepage_url"])
     ET.SubElement(channel, "description").text = html.escape(podcast_info["description"])
     
+    # Podcast image
     image = ET.SubElement(channel, "image")
     ET.SubElement(image, "url").text = html.escape(podcast_info["image_url"])
     ET.SubElement(image, "title").text = html.escape(podcast_info["title"])
     ET.SubElement(image, "link").text = html.escape(podcast_info["homepage_url"])
     
-    ET.SubElement(channel, "itunes:image", href=html.escape(podcast_info["image_url"]))
-    ET.SubElement(channel, "itunes:author").text = html.escape(podcast_info["author"])
-    ET.SubElement(channel, "itunes:explicit").text = "yes" if podcast_info["explicit"] else "no"
+    # iTunes-specific tags
+    ET.SubElement(channel, "{http://www.itunes.com/dtds/podcast-1.0.dtd}image", href=html.escape(podcast_info["image_url"]))
+    ET.SubElement(channel, "{http://www.itunes.com/dtds/podcast-1.0.dtd}author").text = html.escape(podcast_info["author"])
+    ET.SubElement(channel, "{http://www.itunes.com/dtds/podcast-1.0.dtd}explicit").text = "yes" if podcast_info["explicit"] else "no"
     ET.SubElement(channel, "language").text = podcast_info["language"]
-    owner = ET.SubElement(channel, "itunes:owner")
-    ET.SubElement(owner, "itunes:email").text = podcast_info["owner_email"]
+    owner = ET.SubElement(channel, "{http://www.itunes.com/dtds/podcast-1.0.dtd}owner")
+    ET.SubElement(owner, "{http://www.itunes.com/dtds/podcast-1.0.dtd}email").text = podcast_info["owner_email"]
     
-    ET.SubElement(channel, "itunes:category", text=podcast_info["category"])
+    # Category and other optional tags
+    ET.SubElement(channel, "{http://www.itunes.com/dtds/podcast-1.0.dtd}category", text=podcast_info["category"])
 
+    # Episode-level tags
     for episode in episodes:
         item = ET.SubElement(channel, "item")
         ET.SubElement(item, "title").text = html.escape(episode["title"])
         ET.SubElement(item, "description").text = html.escape(episode.get("description", ""))
 
+        # Enclosure with URL, type, and length from audio_file
         if "audio_file" in episode:
             audio_url = episode["audio_file"][0]["audio_url"]
             audio_length = episode["audio_file"][0]["length"]
             ET.SubElement(item, "enclosure", url=html.escape(audio_url), type="audio/mpeg", length=str(audio_length))
 
+        # GUID and publication date
         guid = ET.SubElement(item, "guid", isPermaLink="false")
         guid.text = html.escape(audio_url)
         pub_date = episode.get("pub_date", datetime.now().strftime('%a, %d %b %Y %H:%M:%S GMT'))
         ET.SubElement(item, "pubDate").text = pub_date
 
+        # Duration (assuming duration is available)
         if "duration" in episode["audio_file"]:
-            ET.SubElement(item, "itunes:duration").text = str(round(episode["audio_file"]["duration"], 2))
+            ET.SubElement(item, "{http://www.itunes.com/dtds/podcast-1.0.dtd}duration").text = str(round(episode["audio_file"]["duration"], 2))
         
-        ET.SubElement(item, "itunes:explicit").text = "yes" if episode.get("explicit", False) else "no"
+        # Explicit flag for episode
+        ET.SubElement(item, "{http://www.itunes.com/dtds/podcast-1.0.dtd}explicit").text = "yes" if episode.get("explicit", False) else "no"
         
     # Convert the ElementTree to a pretty-printed XML string
     rough_string = ET.tostring(rss, encoding='utf-8', method='xml')
@@ -101,6 +121,7 @@ def generate_rss_feed(event, context):
         f.write(pretty_xml)
     logging.info("RSS feed generated locally.")
 
+    # Upload the XML file to Google Cloud Storage at a fixed URL
     try:
         storage_client = storage.Client()
         bucket = storage_client.bucket("news_audio_bucket")
