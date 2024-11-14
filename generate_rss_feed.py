@@ -37,10 +37,10 @@ def generate_rss_feed(event, context):
     # Decode the Pub/Sub message
     decoded_data = base64.b64decode(event['data']).decode("utf-8")
     message_data = json.loads(decoded_data)
-    podcast_id = message_data.get("podcast_id")  # Assuming `podcast_id` is passed in the Pub/Sub message
+    # podcast_id = message_data.get("podcast_id")  # Assuming `podcast_id` is passed in the Pub/Sub message
 
     # Fetch podcast and episode data from Supabase
-    podcast_info = fetch_podcast_info(podcast_id)
+    podcast_info = fetch_podcast_info('76f55288-cd16-4b2c-892a-89e1aeac5b27')
     if not podcast_info:
         print("Missing podcast data; RSS feed generation aborted.")
         return

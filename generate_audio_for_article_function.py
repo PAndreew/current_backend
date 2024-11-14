@@ -94,7 +94,8 @@ def generate_audio_for_article(event, context):
             "length": file_length_bytes,
             "duration": round(duration_minutes, 2)
         }
-        publisher.publish(topic_path, json.dumps(audio_message).encode("utf-8"))
+        future = publisher.publish(topic_path, json.dumps(audio_message).encode("utf-8"))
+        print(f"Message id: {future.result()}")
         
         logging.info(f"Audio generated for article ID {article_id}")
 
