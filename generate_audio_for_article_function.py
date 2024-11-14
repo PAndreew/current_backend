@@ -46,19 +46,16 @@ def text_to_speech_stream(text: str) -> BytesIO:
     return audio_stream
 
 def generate_audio_for_article(event, context):
-    subscriber = pubsub_v1.SubscriberClient()
-    publisher = pubsub_v1.PublisherClient()
-    topic_path = publisher.topic_path("your_project_id", "audio-generated")
-    
+    # Decode the Pub/Sub message data received from Eventarc
     article_data = json.loads(event['data'].decode("utf-8"))
-    article_id = article_data["article_id"]
-    
-    # Generate audio content
-    try:
-        text_content = f"{article_data['title']}. {article_data['description']}"
-        audio_stream = text_to_speech_stream(text_content)  # Audio generation logic
+    article_id = article_data.get("article_id")
 
-        # Upload audio to GCS
+    try:
+        # Generate audio content using text-to-speech
+        text_content = f"{article_data['title']}. {article_data['description']}"
+        audio_stream = text_to_speech_stream(text_content)  # Assuming this function exists
+
+        # Upload audio to Google Cloud Storage
         storage_client = storage.Client()
         bucket = storage_client.bucket("your_bucket_name")
         filename = f"audios/{article_data['title']}.mp3"
@@ -66,15 +63,15 @@ def generate_audio_for_article(event, context):
         blob.upload_from_file(audio_stream, content_type="audio/mpeg")
         audio_url = f"https://storage.googleapis.com/{bucket.name}/{filename}"
 
-        # Calculate duration and size
-        blob.reload()
+        # Calculate file length and duration
+        blob.reload()  # Refresh metadata to get the updated size
         file_length_bytes = blob.size
         temp_audio_file = f"/tmp/{article_data['title']}.mp3"
         blob.download_to_filename(temp_audio_file)
         audio = AudioSegment.from_file(temp_audio_file)
         duration_minutes = audio.duration_seconds / 60
 
-        # Save audio data to the database
+        # Store audio metadata in the database
         audio_data = {
             "article_id": article_id,
             "audio_url": audio_url,
@@ -82,20 +79,13 @@ def generate_audio_for_article(event, context):
             "duration": round(duration_minutes, 2)
         }
         supabase.table("audio_file").insert(audio_data).execute()
+        logging.info(f"Audio file created and saved for article ID: {article_id}")
 
-        # Publish to `audio-generated` Pub/Sub topic
-        audio_message = {
-            "article_id": article_id,
-            "audio_url": audio_url,
-            "length": file_length_bytes,
-            "duration": round(duration_minutes, 2)
-        }
-        publisher.publish(topic_path, json.dumps(audio_message).encode("utf-8"))
-        
-        logging.info(f"Audio generated for article ID {article_id}")
+        # Log the completion (Eventarc will trigger the next function)
+        logging.info(f"Audio generated successfully for article ID {article_id}")
 
     except Exception as e:
-        logging.error(f"Error generating audio for article {article_id}: {e}")
+        logging.error(f"Error generating audio for article ID {article_id}: {e}")
         return "Audio generation failed", 500
 
     return "Audio generated and saved", 200

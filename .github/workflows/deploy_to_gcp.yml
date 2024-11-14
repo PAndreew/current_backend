@@ -27,7 +27,7 @@ jobs:
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 
-      # Step 4: Deploy scrape_and_save_articles function
+      # Step 4: Deploy scrape_and_save_articles function (HTTP Trigger)
       - name: Deploy scrape_and_save_articles Function
         run: |
           gcloud functions deploy scrape_and_save_articles \
@@ -35,24 +35,26 @@ jobs:
             --trigger-http \
             --allow-unauthenticated \
             --source . \
-            --entry-point scrape_and_save_articles
+            --entry-point scrape_and_save_articles \
 
-      # Step 5: Deploy generate_audio_file function
-      - name: Deploy generate_audio_file Function
+      # Step 5: Deploy generate_audio_for_article function (Eventarc Trigger)
+      - name: Deploy generate_audio_for_article Function
         run: |
           gcloud functions deploy generate_audio_for_article \
             --runtime python310 \
-            --trigger-topic articles-saved \
+            --trigger-event-filters="type=google.cloud.pubsub.topic.v1.messagePublished" \
+            --trigger-event-filters="resource=projects/${{ secrets.GCP_PROJECT_ID }}/topics/articles-saved" \
             --allow-unauthenticated \
             --source . \
-            --entry-point generate_audio_for_article
+            --entry-point generate_audio_for_article \
 
-      # Step 6: Deploy generate_rss_feed function
+      # Step 6: Deploy generate_rss_feed function (Eventarc Trigger)
       - name: Deploy generate_rss_feed Function
         run: |
           gcloud functions deploy generate_rss_feed \
             --runtime python310 \
-            --trigger-topic audio-generated \
+            --trigger-event-filters="type=google.cloud.pubsub.topic.v1.messagePublished" \
+            --trigger-event-filters="resource=projects/${{ secrets.GCP_PROJECT_ID }}/topics/audio-generated" \
             --allow-unauthenticated \
             --source . \
-            --entry-point generate_rss_feed
+            --entry-point generate_rss_feed \

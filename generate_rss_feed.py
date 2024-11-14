@@ -3,6 +3,7 @@ import xml.etree.ElementTree as ET
 from google.cloud import pubsub_v1, storage
 from datetime import datetime
 import json
+import logging
 
 # Initialize Supabase client
 SUPABASE_URL=r"https://uhhdiibmeitulvkbpwud.supabase.co"
@@ -33,21 +34,21 @@ def fetch_episodes_with_audio(podcast_category):
         return []
 
 def generate_rss_feed(event, context):
-    # Decode the Pub/Sub message
-    message_data = json.loads(event['data'].decode("utf-8"))
+    # Extract and parse the Eventarc message data
+    message_data = json.loads(event.get("data", "{}"))
     podcast_id = message_data.get("podcast_id")  # Assuming `podcast_id` is passed in the Pub/Sub message
 
     # Fetch podcast and episode data from Supabase
     podcast_info = fetch_podcast_info(podcast_id)
     if not podcast_info:
-        print("Missing podcast data; RSS feed generation aborted.")
+        logging.error("Missing podcast data; RSS feed generation aborted.")
         return
 
     # Fetch all episodes with audio for this podcast
     episodes = fetch_episodes_with_audio(podcast_info["category"])
 
     if not episodes:
-        print("No episodes found; RSS feed generation aborted.")
+        logging.error("No episodes found; RSS feed generation aborted.")
         return
 
     # Start generating the RSS feed
@@ -105,14 +106,14 @@ def generate_rss_feed(event, context):
     local_file_path = "/tmp/podcast_feed.xml"
     tree = ET.ElementTree(rss)
     tree.write(local_file_path, encoding='utf-8', xml_declaration=True)
-    print("RSS feed generated locally.")
+    logging.info("RSS feed generated locally.")
 
     # Upload the XML file to Google Cloud Storage at a fixed URL
     storage_client = storage.Client()
     bucket = storage_client.bucket("news_audio_bucket")
     blob = bucket.blob("audio/rss/rss_feed.xml")
     blob.upload_from_filename(local_file_path, content_type="application/rss+xml")
-    print("RSS feed uploaded to Google Cloud Storage.")
+    logging.info("RSS feed uploaded to Google Cloud Storage.")
 
 # Usage
 # generate_rss_feed("your-podcast-id")
