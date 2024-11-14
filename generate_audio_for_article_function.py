@@ -48,7 +48,7 @@ def text_to_speech_stream(text: str) -> BytesIO:
 def generate_audio_for_article(event, context):
     subscriber = pubsub_v1.SubscriberClient()
     publisher = pubsub_v1.PublisherClient()
-    topic_path = publisher.topic_path("your_project_id", "audio-generated")
+    topic_path = publisher.topic_path("currentlyai", "audio-generated")
     
     article_data = json.loads(event['data'].decode("utf-8"))
     article_id = article_data["article_id"]
