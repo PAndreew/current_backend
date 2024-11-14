@@ -53,10 +53,15 @@ def generate_audio_for_article(event, context):
     print(event['data'])
 
     decoded_data = base64.b64decode(event['data']).decode("utf-8")
-    
     article_data = json.loads(decoded_data)
     article_id = article_data["article_id"]
-    
+
+    # Check if audio already exists for this article
+    existing_audio = supabase.table("audio_file").select("*").eq("article_id", article_id).execute()
+    if existing_audio.data:
+        logging.info(f"Audio already exists for article ID {article_id}; skipping generation.")
+        return "Audio already exists; skipping generation", 200
+
     # Generate audio content
     try:
         text_content = f"{article_data['title']}. {article_data['description']}"
