@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import base64
+import html
 
 # Initialize Supabase client
 SUPABASE_URL = os.getenv("SUPABASE_URL")
