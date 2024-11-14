@@ -19,12 +19,11 @@ def fetch_podcast_info(podcast_id):
         print("Error fetching podcast data:", response)
         return None
 
-def fetch_episodes_with_audio(podcast_category):
+def fetch_episodes_with_audio():
     # Fetch articles and their associated audio files
     response = (
         supabase.table("article")
-        .select("*, audio_file(url, length)")
-        .eq("category", podcast_category)
+        .select("*, audio_file(audio_url, length, duration)")
         .execute()
     )
     if response.data:
@@ -46,7 +45,7 @@ def generate_rss_feed(event, context):
         return
 
     # Fetch all episodes with audio for this podcast
-    episodes = fetch_episodes_with_audio(podcast_info["category"])
+    episodes = fetch_episodes_with_audio()
 
     if not episodes:
         print("No episodes found; RSS feed generation aborted.")
