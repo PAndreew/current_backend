@@ -1,5 +1,6 @@
 import logging
 import os
+import json
 import random
 from io import BytesIO
 from supabase import create_client, Client

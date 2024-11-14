@@ -90,6 +90,7 @@ def scrape_and_save_articles(request):
                 "pub_date": pub_date.isoformat(),
                 "link": entry.link
             }
-            publisher.publish(topic_path, json.dumps(article_message).encode("utf-8"))
+            future = publisher.publish(topic_path, json.dumps(article_message).encode("utf-8"))
+            print(f"Message id: {future.result()}")
 
     return "RSS scraping complete", 200
