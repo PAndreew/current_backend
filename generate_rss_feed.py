@@ -3,6 +3,7 @@ import xml.etree.ElementTree as ET
 from google.cloud import pubsub_v1, storage
 from datetime import datetime
 import json
+import base64
 
 # Initialize Supabase client
 SUPABASE_URL=r"https://uhhdiibmeitulvkbpwud.supabase.co"
@@ -34,7 +35,8 @@ def fetch_episodes_with_audio(podcast_category):
 
 def generate_rss_feed(event, context):
     # Decode the Pub/Sub message
-    message_data = json.loads(event['data'].decode("utf-8"))
+    decoded_data = base64.b64decode(event['data']).decode("utf-8")
+    message_data = json.loads(decoded_data)
     podcast_id = message_data.get("podcast_id")  # Assuming `podcast_id` is passed in the Pub/Sub message
 
     # Fetch podcast and episode data from Supabase

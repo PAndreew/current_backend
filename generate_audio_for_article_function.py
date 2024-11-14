@@ -2,6 +2,7 @@ import logging
 import os
 import json
 import random
+import base64
 from io import BytesIO
 from supabase import create_client, Client
 from google.cloud import storage, pubsub_v1
@@ -47,11 +48,13 @@ def text_to_speech_stream(text: str) -> BytesIO:
     return audio_stream
 
 def generate_audio_for_article(event, context):
-    subscriber = pubsub_v1.SubscriberClient()
     publisher = pubsub_v1.PublisherClient()
     topic_path = publisher.topic_path("currentlyai", "audio-generated")
+    print(event['data'])
+
+    decoded_data = base64.b64decode(event['data']).decode("utf-8")
     
-    article_data = json.loads(event['data'].decode("utf-8"))
+    article_data = json.loads(decoded_data)
     article_id = article_data["article_id"]
     
     # Generate audio content
@@ -61,7 +64,7 @@ def generate_audio_for_article(event, context):
 
         # Upload audio to GCS
         storage_client = storage.Client()
-        bucket = storage_client.bucket("your_bucket_name")
+        bucket = storage_client.bucket("news_audio_bucket")
         filename = f"audios/{article_data['title']}.mp3"
         blob = bucket.blob(filename)
         blob.upload_from_file(audio_stream, content_type="audio/mpeg")
@@ -86,8 +89,8 @@ def generate_audio_for_article(event, context):
 
         # Publish to `audio-generated` Pub/Sub topic
         audio_message = {
-            "article_id": article_id,
-            "audio_url": audio_url,
+            "article_id": str(article_id),
+            "audio_url": str(audio_url),
             "length": file_length_bytes,
             "duration": round(duration_minutes, 2)
         }

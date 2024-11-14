@@ -84,11 +84,11 @@ def scrape_and_save_articles(request):
 
             # Publish to Pub/Sub for audio generation
             article_message = {
-                "article_id": article_id,
-                "title": entry.title,
-                "description": processed_text,
-                "pub_date": pub_date.isoformat(),
-                "link": entry.link
+                "article_id": str(article_id),           # Convert article_id to string
+                "title": str(entry.title),               # Ensure title is a string
+                "description": str(processed_text),      # Ensure description is a string
+                "pub_date": pub_date.isoformat(),        # Ensure pub_date is an ISO-formatted string
+                "link": str(entry.link)                  # Ensure link is a string
             }
             future = publisher.publish(topic_path, json.dumps(article_message).encode("utf-8"))
             print(f"Message id: {future.result()}")
