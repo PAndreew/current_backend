@@ -4,12 +4,13 @@ from google.cloud import pubsub_v1, storage
 from datetime import datetime
 import json
 import logging
+import os
 import base64
 
 # Initialize Supabase client
-SUPABASE_URL=r"https://uhhdiibmeitulvkbpwud.supabase.co"
-SUPABASE_ANON_KEY=r"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVoaGRpaWJtZWl0dWx2a2Jwd3VkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzA4MzA5NjQsImV4cCI6MjA0NjQwNjk2NH0.f-mcqw7Pc6IUIthL4kGgUYdRWXEpgPyWQrWYcFx2MXs"
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def fetch_podcast_info(podcast_id):
     # Fetch podcast metadata from Supabase
