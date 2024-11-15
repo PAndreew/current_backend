@@ -1,13 +1,12 @@
 from supabase import create_client, Client
 import xml.etree.ElementTree as ET
 from google.cloud import pubsub_v1, storage
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import logging
 import os
 import base64
 from xml.dom import minidom
-import html
 
 # Initialize Supabase client
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -22,12 +21,19 @@ def fetch_podcast_info(podcast_id):
         print("Error fetching podcast data:", response)
         return None
 
-def fetch_episodes_with_audio():
+def fetch_recent_episodes_with_audio():
+    # Calculate timestamp for 24 hours ago
+    twenty_four_hours_ago = datetime.utcnow() - timedelta(hours=24)
+    timestamp = twenty_four_hours_ago.isoformat()
+
     response = (
         supabase.table("article")
         .select("*, audio_file(audio_url, length, duration)")
+        .gte("created_at", timestamp)  # Filter for articles newer than 24 hours
+        .order("created_at", desc=True)  # Most recent first
         .execute()
     )
+    
     if response.data:
         return response.data
     else:
@@ -42,9 +48,6 @@ def create_xml_element(parent, tag, text=None, attrib=None):
     return element
 
 def generate_rss_feed(event, context):
-    # Decode the Pub/Sub message
-    decoded_data = base64.b64decode(event['data']).decode("utf-8")
-    message_data = json.loads(decoded_data)
     
     # Fetch podcast and episode data from Supabase
     podcast_info = fetch_podcast_info('76f55288-cd16-4b2c-892a-89e1aeac5b27')
@@ -52,10 +55,13 @@ def generate_rss_feed(event, context):
         logging.error("Missing podcast data; RSS feed generation aborted.")
         return
 
-    episodes = fetch_episodes_with_audio()
+    # Fetch only recent episodes
+    episodes = fetch_recent_episodes_with_audio()
     if not episodes:
-        logging.info("No episodes found; RSS feed generation aborted.")
+        logging.info("No recent episodes found; RSS feed generation aborted.")
         return
+
+    logging.info(f"Found {len(episodes)} episodes from the last 24 hours")
 
     # Create XML document with proper encoding declaration
     rss = ET.Element("rss", version="2.0")
@@ -70,6 +76,10 @@ def generate_rss_feed(event, context):
     create_xml_element(channel, "title", podcast_info["title"])
     create_xml_element(channel, "link", podcast_info["homepage_url"])
     create_xml_element(channel, "description", podcast_info["description"])
+    
+    # Add last build date
+    create_xml_element(channel, "lastBuildDate", 
+                      datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT'))
     
     # Podcast image
     image = create_xml_element(channel, "image")
@@ -100,7 +110,7 @@ def generate_rss_feed(event, context):
         create_xml_element(item, "description", episode.get("description", ""))
 
         # Enclosure with URL, type, and length from audio_file
-        if "audio_file" in episode:
+        if "audio_file" in episode and episode["audio_file"]:
             audio_url = episode["audio_file"][0]["audio_url"]
             audio_length = episode["audio_file"][0]["length"]
             create_xml_element(item, "enclosure", attrib={
@@ -109,15 +119,24 @@ def generate_rss_feed(event, context):
                 "length": str(audio_length)
             })
 
-        # GUID and publication date
-        create_xml_element(item, "guid", audio_url, {"isPermaLink": "false"})
-        pub_date = episode.get("pub_date", datetime.now().strftime('%a, %d %b %Y %H:%M:%S GMT'))
-        create_xml_element(item, "pubDate", pub_date)
+            # GUID and publication date
+            create_xml_element(item, "guid", audio_url, {"isPermaLink": "false"})
+            
+            # Use created_at for pubDate if available, otherwise current time
+            pub_date = episode.get("created_at", datetime.utcnow().isoformat())
+            # Convert ISO format to RFC 822 format required by RSS
+            try:
+                pub_datetime = datetime.fromisoformat(pub_date.replace("Z", "+00:00"))
+                formatted_pub_date = pub_datetime.strftime('%a, %d %b %Y %H:%M:%S GMT')
+            except (ValueError, AttributeError):
+                formatted_pub_date = datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT')
+            
+            create_xml_element(item, "pubDate", formatted_pub_date)
 
-        # Duration
-        if "duration" in episode["audio_file"]:
-            create_xml_element(item, "{http://www.itunes.com/dtds/podcast-1.0.dtd}duration",
-                             str(round(episode["audio_file"]["duration"], 2)))
+            # Duration
+            if "duration" in episode["audio_file"][0]:
+                create_xml_element(item, "{http://www.itunes.com/dtds/podcast-1.0.dtd}duration",
+                                str(round(episode["audio_file"][0]["duration"], 2)))
         
         # Explicit flag for episode
         create_xml_element(item, "{http://www.itunes.com/dtds/podcast-1.0.dtd}explicit",
