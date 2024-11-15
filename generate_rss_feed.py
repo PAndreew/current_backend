@@ -153,10 +153,10 @@ def generate_rss_feed(event, context):
                          "yes" if episode.get("explicit", False) else "no")
     
     # Convert to string with proper XML declaration and encoding
-    xml_declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'
+    # xml_declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'
     rough_string = ET.tostring(rss, encoding='unicode', method='xml')
     reparsed = minidom.parseString(rough_string)
-    pretty_xml = xml_declaration + reparsed.toprettyxml(indent="  ", encoding=None)
+    pretty_xml = reparsed.toprettyxml(indent="  ", encoding='UTF-8')
 
     # Write the pretty-printed XML to file with UTF-8 encoding
     local_file_path = "/tmp/podcast_feed.xml"
