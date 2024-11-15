@@ -154,14 +154,22 @@ def generate_rss_feed(event, context):
     
     # Convert to string with proper XML declaration and encoding
     # xml_declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'
-    rough_string = ET.tostring(rss, encoding='unicode', method='xml')
+    rough_string = ET.tostring(rss, encoding='utf-8', method='xml')  # Generate as bytes with correct encoding
+
+    # Reparse the string to create a pretty-printed XML
     reparsed = minidom.parseString(rough_string)
-    pretty_xml = reparsed.toprettyxml(indent="  ", encoding='UTF-8')
+
+    # Pretty-print the XML without generating a second declaration
+    pretty_xml = reparsed.toprettyxml(indent="  ")
+
+    # Ensure the final output has a single declaration
+    xml_declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'
+    final_xml = xml_declaration + pretty_xml.split('\n', 1)[1]  # Avoids duplicates from `minidom`
 
     # Write the pretty-printed XML to file with UTF-8 encoding
     local_file_path = "/tmp/podcast_feed.xml"
     with open(local_file_path, "w", encoding="utf-8") as f:
-        f.write(pretty_xml)
+        f.write(final_xml)
     logging.info("RSS feed generated locally.")
 
     # Upload the XML file to Google Cloud Storage with proper content type and encoding
