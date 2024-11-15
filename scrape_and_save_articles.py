@@ -1,6 +1,7 @@
 import feedparser
 import logging
 import os
+import re
 from datetime import datetime
 from dateutil import parser as date_parser
 from datetime import datetime
@@ -27,6 +28,20 @@ RSS_FEEDS = [
     'https://index.hu/24ora/rss/'
 ]
 
+def remove_html_tags(input_string):
+    """
+    Remove HTML tags from the given string.
+    
+    Args:
+        input_string (str): The string containing HTML tags.
+        
+    Returns:
+        str: The string with HTML tags removed.
+    """
+    # Regular expression to match HTML tags
+    clean_text = re.sub(r'<[^>]+>', '', input_string)
+    return clean_text
+
 def clean_text(text: str) -> str:
     completion = client.chat.completions.create(
         model="gpt-4o-mini",
@@ -34,7 +49,7 @@ def clean_text(text: str) -> str:
             {"role": "system", "content": "You are an HTML cleaner."},
             {
                 "role": "user",
-                "content": f"Clean the following data by removing unnecessary characters, typos and by converting numbers to words: '{text}'. Return the processed text."
+                "content": f"Clean the following data by removing unnecessary characters, typos and by converting numbers to words: '{text}'. Return only the raw processed text."
             }
         ]
     )
@@ -69,7 +84,8 @@ def scrape_and_save_articles(request):
 
             # Process and save new article
             pub_date = parse_pub_date(entry)
-            processed_text = clean_text(entry.description)
+            text_without_tags = remove_html_tags(entry.description)
+            processed_text = clean_text(text_without_tags)
             article_data = {
                 "title": entry.title,
                 "description": processed_text,
