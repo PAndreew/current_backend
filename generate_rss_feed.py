@@ -1,7 +1,7 @@
 from supabase import create_client, Client
 import xml.etree.ElementTree as ET
 from google.cloud import pubsub_v1, storage
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import json
 import logging
 import os
@@ -22,15 +22,15 @@ def fetch_podcast_info(podcast_id):
         return None
 
 def fetch_recent_episodes_with_audio():
-    # Calculate timestamp for 24 hours ago
-    twenty_four_hours_ago = datetime.utcnow() - timedelta(hours=24)
+    # Calculate timestamp for 24 hours ago using timezone-aware datetime
+    twenty_four_hours_ago = datetime.now(timezone.utc) - timedelta(hours=24)
     timestamp = twenty_four_hours_ago.isoformat()
 
     response = (
         supabase.table("article")
         .select("*, audio_file(audio_url, length, duration)")
-        .gte("created_at", timestamp)  # Filter for articles newer than 24 hours
-        .order("created_at", desc=True)  # Most recent first
+        .gte("pub_date", timestamp)  # Filter for articles newer than 24 hours
+        .order("pub_date", desc=True)  # Most recent first
         .execute()
     )
     
@@ -47,7 +47,14 @@ def create_xml_element(parent, tag, text=None, attrib=None):
         element.text = text
     return element
 
+def format_datetime_rfc822(dt):
+    """Convert datetime to RFC 822 format required by RSS"""
+    return dt.strftime('%a, %d %b %Y %H:%M:%S %z')
+
 def generate_rss_feed(event, context):
+    # Decode the Pub/Sub message
+    decoded_data = base64.b64decode(event['data']).decode("utf-8")
+    message_data = json.loads(decoded_data)
     
     # Fetch podcast and episode data from Supabase
     podcast_info = fetch_podcast_info('76f55288-cd16-4b2c-892a-89e1aeac5b27')
@@ -77,9 +84,9 @@ def generate_rss_feed(event, context):
     create_xml_element(channel, "link", podcast_info["homepage_url"])
     create_xml_element(channel, "description", podcast_info["description"])
     
-    # Add last build date
-    create_xml_element(channel, "lastBuildDate", 
-                      datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT'))
+    # Add last build date using timezone-aware datetime
+    current_time = datetime.now(timezone.utc)
+    create_xml_element(channel, "lastBuildDate", format_datetime_rfc822(current_time))
     
     # Podcast image
     image = create_xml_element(channel, "image")
@@ -122,14 +129,17 @@ def generate_rss_feed(event, context):
             # GUID and publication date
             create_xml_element(item, "guid", audio_url, {"isPermaLink": "false"})
             
-            # Use created_at for pubDate if available, otherwise current time
-            pub_date = episode.get("created_at", datetime.utcnow().isoformat())
-            # Convert ISO format to RFC 822 format required by RSS
-            try:
-                pub_datetime = datetime.fromisoformat(pub_date.replace("Z", "+00:00"))
-                formatted_pub_date = pub_datetime.strftime('%a, %d %b %Y %H:%M:%S GMT')
-            except (ValueError, AttributeError):
-                formatted_pub_date = datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT')
+            # Use pub_date for pubDate if available, otherwise current time
+            pub_date = episode.get("pub_date")
+            if pub_date:
+                try:
+                    # Parse ISO format string to timezone-aware datetime
+                    pub_datetime = datetime.fromisoformat(pub_date.replace("Z", "+00:00"))
+                    formatted_pub_date = format_datetime_rfc822(pub_datetime)
+                except (ValueError, AttributeError):
+                    formatted_pub_date = format_datetime_rfc822(datetime.now(timezone.utc))
+            else:
+                formatted_pub_date = format_datetime_rfc822(datetime.now(timezone.utc))
             
             create_xml_element(item, "pubDate", formatted_pub_date)
 
