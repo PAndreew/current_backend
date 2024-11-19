@@ -1,8 +1,11 @@
 import logging
 import os
 import json
+import re
 import random
 import base64
+import unicodedata
+from urllib.parse import quote
 from io import BytesIO
 from supabase import create_client, Client
 from google.cloud import storage, pubsub_v1
@@ -59,13 +62,25 @@ def generate_audio_for_article(event, context):
     
     # Generate audio content
     try:
+        existing_audio = supabase.table("audio_file").select("*").eq("article_id", article_id).execute()
+        if existing_audio.data:
+            logging.info(f"Audio for article ID {article_id} already exists. Skipping generation.")
+            return "Audio already exists", 200
         text_content = f"{article_data['title']}. {article_data['description']}"
         audio_stream = text_to_speech_stream(text_content)  # Audio generation logic
 
         # Upload audio to GCS
         storage_client = storage.Client()
         bucket = storage_client.bucket("news_audio_bucket")
-        filename = f"audios/{article_data['title']}.mp3"
+        # Normalize and sanitize title for filename
+        safe_title = unicodedata.normalize('NFD', article_data['title'])
+        safe_title = ''.join(c for c in safe_title if unicodedata.category(c) != 'Mn')  # Strip accents
+        safe_title = re.sub(r'[^\w\s-]', '', safe_title)  # Remove special characters
+        safe_title = safe_title.replace(' ', '_')  # Replace spaces with underscores
+
+        # (Optional) Encode for URL safety
+        safe_title = quote(safe_title)
+        filename = f"audios/{safe_title}.mp3"
         blob = bucket.blob(filename)
         blob.upload_from_file(audio_stream, content_type="audio/mpeg")
         audio_url = f"https://storage.googleapis.com/{bucket.name}/{filename}"
