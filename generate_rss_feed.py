@@ -2,7 +2,7 @@ from supabase import create_client, Client
 import xml.etree.ElementTree as ET
 from google.cloud import pubsub_v1, storage
 from email.utils import format_datetime
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import base64
 
@@ -106,7 +106,7 @@ def generate_rss_feed(event, context):
         guid = ET.SubElement(item, "guid", isPermaLink="false")
         guid.text = audio_url  # Use audio URL as GUID
         # Convert ISO 8601 to datetime object
-        iso_date = episode.get("pub_date", datetime.now(datetime.timezone.utc).isoformat())
+        iso_date = episode.get("pub_date", datetime.now(timezone.utc).isoformat())
         pub_date_obj = datetime.fromisoformat(iso_date.replace("Z", "+00:00"))
 
         # Convert datetime to RFC 2822 format
@@ -121,7 +121,7 @@ def generate_rss_feed(event, context):
         ET.SubElement(item, "itunes:explicit").text = "true" if episode.get("explicit", False) else "false"
 
         # Duration (assuming duration is available)
-        duration = episode["audio_file"].get("duration", 0)
+        duration = episode["audio_file"][0].get("duration", 0)
         ET.SubElement(item, "itunes:duration").text = str(round(duration, 2)) if duration else "0:00"
         
         
