@@ -1,18 +1,19 @@
 from supabase import create_client, Client
 import xml.etree.ElementTree as ET
-from google.cloud import pubsub_v1, storage
-from email.utils import format_datetime
-from datetime import datetime, timezone
+from google.cloud import  storage
+from datetime import datetime, timedelta, timezone
 import json
+import logging
+import os
 import base64
+from xml.dom import minidom
 
 # Initialize Supabase client
-SUPABASE_URL=r"https://uhhdiibmeitulvkbpwud.supabase.co"
-SUPABASE_ANON_KEY=r"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVoaGRpaWJtZWl0dWx2a2Jwd3VkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzA4MzA5NjQsImV4cCI6MjA0NjQwNjk2NH0.f-mcqw7Pc6IUIthL4kGgUYdRWXEpgPyWQrWYcFx2MXs"
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def fetch_podcast_info(podcast_id):
-    # Fetch podcast metadata from Supabase
     response = supabase.table("podcast").select("*").eq("id", podcast_id).single().execute()
     if response.data:
         return response.data
@@ -20,123 +21,166 @@ def fetch_podcast_info(podcast_id):
         print("Error fetching podcast data:", response)
         return None
 
-def fetch_episodes_with_audio():
-    # Fetch articles and their associated audio files
+def fetch_recent_episodes_with_audio():
+    # Calculate timestamp for 24 hours ago using timezone-aware datetime
+    twenty_four_hours_ago = datetime.now(timezone.utc) - timedelta(hours=24)
+    timestamp = twenty_four_hours_ago.isoformat()
+
     response = (
         supabase.table("article")
         .select("*, audio_file(audio_url, length, duration)")
+        .gte("pub_date", timestamp)  # Filter for articles newer than 24 hours
+        .order("pub_date", desc=True)  # Most recent first
         .execute()
     )
+    
     if response.data:
         return response.data
     else:
         print("Error fetching articles and audio files:", response)
         return []
 
+def create_xml_element(parent, tag, text=None, attrib=None):
+    """Helper function to create XML elements with proper encoding"""
+    element = ET.SubElement(parent, tag, attrib or {})
+    if text is not None:
+        element.text = text
+    return element
+
+def format_datetime_rfc822(dt):
+    """Convert datetime to RFC 822 format required by RSS"""
+    return dt.strftime('%a, %d %b %Y %H:%M:%S %z')
+
 def generate_rss_feed(event, context):
     # Decode the Pub/Sub message
-    # decoded_data = base64.b64decode(event['data']).decode("utf-8")
-    # message_data = json.loads(decoded_data)
-    # podcast_id = message_data.get("podcast_id")  # Assuming `podcast_id` is passed in the Pub/Sub message
-
+    decoded_data = base64.b64decode(event['data']).decode("utf-8")
+    message_data = json.loads(decoded_data)
+    
     # Fetch podcast and episode data from Supabase
     podcast_info = fetch_podcast_info('76f55288-cd16-4b2c-892a-89e1aeac5b27')
     if not podcast_info:
-        print("Missing podcast data; RSS feed generation aborted.")
+        logging.error("Missing podcast data; RSS feed generation aborted.")
         return
 
-    # Fetch all episodes with audio for this podcast
-    episodes = fetch_episodes_with_audio()
-
+    # Fetch only recent episodes
+    episodes = fetch_recent_episodes_with_audio()
     if not episodes:
-        print("No episodes found; RSS feed generation aborted.")
+        logging.info("No recent episodes found; RSS feed generation aborted.")
         return
 
-    # Start generating the RSS feed
-    rss = ET.Element(
-        "rss", 
-        version="2.0", 
-        attrib={
-            "xmlns:itunes": "http://www.itunes.com/dtds/podcast-1.0.dtd",
-            "xmlns:podcast": "https://podcastindex.org/namespace/1.0",
-            "xmlns:atom": "http://www.w3.org/2005/Atom",
-            "xmlns:content": "http://purl.org/rss/1.0/modules/content/"
-        }
-    )
+    logging.info(f"Found {len(episodes)} episodes from the last 24 hours")
+
+    # Create XML document with proper encoding declaration
+    rss = ET.Element("rss", version="2.0")
+    
+    # Register namespaces explicitly
+    ET.register_namespace("itunes", "http://www.itunes.com/dtds/podcast-1.0.dtd")
+    ET.register_namespace("atom", "http://www.w3.org/2005/Atom")
+    
     channel = ET.SubElement(rss, "channel")
     
-    # Podcast-level tags
-    ET.SubElement(channel, "title").text = podcast_info["title"]
-    ET.SubElement(channel, "link").text = podcast_info["homepage_url"]
-    ET.SubElement(channel, "description").text = podcast_info["description"]
-    ET.SubElement(channel, "language").text = podcast_info["language"]
-
-    # Atom self-link
-    ET.SubElement(channel, "atom:link", href="https://storage.googleapis.com/news_audio_bucket/audio/rss/rss_feed.xml", rel="self", type="application/rss+xml")
+    # Podcast-level tags with proper encoding
+    create_xml_element(channel, "title", podcast_info["title"])
+    create_xml_element(channel, "link", podcast_info["homepage_url"])
+    create_xml_element(channel, "description", podcast_info["description"])
+    
+    # Add last build date using timezone-aware datetime
+    current_time = datetime.now(timezone.utc)
+    create_xml_element(channel, "lastBuildDate", format_datetime_rfc822(current_time))
     
     # Podcast image
-    image = ET.SubElement(channel, "image")
-    ET.SubElement(image, "url").text = podcast_info["image_url"]
-    ET.SubElement(image, "title").text = podcast_info["title"]
-    ET.SubElement(image, "link").text = podcast_info["homepage_url"]
+    image = create_xml_element(channel, "image")
+    create_xml_element(image, "url", podcast_info["image_url"])
+    create_xml_element(image, "title", podcast_info["title"])
+    create_xml_element(image, "link", podcast_info["homepage_url"])
     
     # iTunes-specific tags
-    ET.SubElement(channel, "itunes:image", href=podcast_info["image_url"])
-    ET.SubElement(channel, "itunes:author").text = podcast_info["author"]
-    ET.SubElement(channel, "itunes:explicit").text = "true" if podcast_info["explicit"] else "false"
-    owner = ET.SubElement(channel, "itunes:owner")
-    ET.SubElement(owner, "itunes:email").text = podcast_info["owner_email"]
+    create_xml_element(channel, "{http://www.itunes.com/dtds/podcast-1.0.dtd}image", 
+                      attrib={"href": podcast_info["image_url"]})
+    create_xml_element(channel, "{http://www.itunes.com/dtds/podcast-1.0.dtd}author", 
+                      podcast_info["author"])
+    create_xml_element(channel, "{http://www.itunes.com/dtds/podcast-1.0.dtd}explicit", 
+                      "yes" if podcast_info["explicit"] else "no")
+    create_xml_element(channel, "language", podcast_info["language"])
     
-    # Category and other optional tags
-    ET.SubElement(channel, "itunes:category", text="News")
+    owner = create_xml_element(channel, "{http://www.itunes.com/dtds/podcast-1.0.dtd}owner")
+    create_xml_element(owner, "{http://www.itunes.com/dtds/podcast-1.0.dtd}email", 
+                      podcast_info["owner_email"])
+    
+    create_xml_element(channel, "{http://www.itunes.com/dtds/podcast-1.0.dtd}category", 
+                      attrib={"text": podcast_info["category"]})
 
     # Episode-level tags
     for episode in episodes:
-        item = ET.SubElement(channel, "item")
-        ET.SubElement(item, "title").text = episode["title"]
-        ET.SubElement(item, "description").text = episode.get("description", "")
+        item = create_xml_element(channel, "item")
+        create_xml_element(item, "title", episode["title"])
+        create_xml_element(item, "description", episode.get("description", ""))
 
         # Enclosure with URL, type, and length from audio_file
-        if "audio_file" in episode:
+        if "audio_file" in episode and episode["audio_file"]:
             audio_url = episode["audio_file"][0]["audio_url"]
             audio_length = episode["audio_file"][0]["length"]
-            ET.SubElement(item, "enclosure", url=audio_url, type="audio/mpeg", length=str(audio_length))
+            create_xml_element(item, "enclosure", attrib={
+                "url": audio_url,
+                "type": "audio/mpeg",
+                "length": str(audio_length)
+            })
 
-        # GUID and publication date
-        guid = ET.SubElement(item, "guid", isPermaLink="false")
-        guid.text = audio_url  # Use audio URL as GUID
-        # Convert ISO 8601 to datetime object
-        iso_date = episode.get("pub_date", datetime.now(timezone.utc).isoformat())
-        pub_date_obj = datetime.fromisoformat(iso_date.replace("Z", "+00:00"))
+            # GUID and publication date
+            create_xml_element(item, "guid", audio_url, {"isPermaLink": "false"})
+            
+            # Use pub_date for pubDate if available, otherwise current time
+            pub_date = episode.get("pub_date")
+            if pub_date:
+                try:
+                    # Parse ISO format string to timezone-aware datetime
+                    pub_datetime = datetime.fromisoformat(pub_date.replace("Z", "+00:00"))
+                    formatted_pub_date = format_datetime_rfc822(pub_datetime)
+                except (ValueError, AttributeError):
+                    formatted_pub_date = format_datetime_rfc822(datetime.now(timezone.utc))
+            else:
+                formatted_pub_date = format_datetime_rfc822(datetime.now(timezone.utc))
+            
+            create_xml_element(item, "pubDate", formatted_pub_date)
 
-        # Convert datetime to RFC 2822 format
-        formatted_pub_date = format_datetime(pub_date_obj)
-
-        # Add pubDate to the RSS item
-        ET.SubElement(item, "pubDate").text = formatted_pub_date
-
-         # Additional fields
-        ET.SubElement(item, "link").text = episode.get("link", podcast_info["homepage_url"])  # Default to homepage if no episode link
-        ET.SubElement(item, "itunes:image", href=episode.get("image_url", podcast_info["image_url"]))
-        ET.SubElement(item, "itunes:explicit").text = "true" if episode.get("explicit", False) else "false"
-
-        # Duration (assuming duration is available)
-        duration = episode["audio_file"][0].get("duration", 0)
-        ET.SubElement(item, "itunes:duration").text = str(round(duration, 2)) if duration else "0:00"
+            # Duration
+            if "duration" in episode["audio_file"][0]:
+                create_xml_element(item, "{http://www.itunes.com/dtds/podcast-1.0.dtd}duration",
+                                str(round(episode["audio_file"][0]["duration"], 2)))
         
-        
-    # Write the RSS feed to a local XML file
+        # Explicit flag for episode
+        create_xml_element(item, "{http://www.itunes.com/dtds/podcast-1.0.dtd}explicit",
+                         "yes" if episode.get("explicit", False) else "no")
+    
+    # Convert to string with proper XML declaration and encoding
+    # xml_declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'
+    rough_string = ET.tostring(rss, encoding='utf-8', method='xml')  # Generate as bytes with correct encoding
+
+    # Reparse the string to create a pretty-printed XML
+    reparsed = minidom.parseString(rough_string)
+
+    # Pretty-print the XML without generating a second declaration
+    pretty_xml = reparsed.toprettyxml(indent="  ")
+
+    # Ensure the final output has a single declaration
+    xml_declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'
+    final_xml = xml_declaration + pretty_xml.split('\n', 1)[1]  # Avoids duplicates from `minidom`
+
+    # Write the pretty-printed XML to file with UTF-8 encoding
     local_file_path = "/tmp/podcast_feed.xml"
-    tree = ET.ElementTree(rss)
-    tree.write(local_file_path, encoding='utf-8', xml_declaration=True)
-    print("RSS feed generated locally.")
+    with open(local_file_path, "w", encoding="utf-8") as f:
+        f.write(final_xml)
+    logging.info("RSS feed generated locally.")
 
-    # Upload the XML file to Google Cloud Storage at a fixed URL
-    storage_client = storage.Client()
-    bucket = storage_client.bucket("news_audio_bucket")
-    blob = bucket.blob("audio/rss/rss_feed.xml")
-    blob.upload_from_filename(local_file_path, content_type="application/rss+xml")
-    print("RSS feed uploaded to Google Cloud Storage.")
-
-# Usage
-# generate_rss_feed("your-podcast-id")
+    # Upload the XML file to Google Cloud Storage with proper content type and encoding
+    try:
+        storage_client = storage.Client()
+        bucket = storage_client.bucket("news_audio_bucket")
+        blob = bucket.blob("audio/rss/rss_feed.xml")
+        blob.upload_from_filename(
+            local_file_path,
+            content_type="application/rss+xml; charset=utf-8"
+        )
+        logging.info("RSS feed uploaded to Google Cloud Storage.")
+    except Exception as e:
+        logging.error(f"Error uploading RSS feed to Google Cloud Storage: {e}")
