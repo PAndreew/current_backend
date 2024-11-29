@@ -9,14 +9,14 @@ from openai import OpenAI
 from bs4 import BeautifulSoup  # For HTML parsing
 
 # Environment Variables
-# SUPABASE_URL = os.getenv("SUPABASE_URL")
-# SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-# GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT")
 # # OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-# bucket_name = os.getenv("GCS_BUCKET_NAME", "news_audio_bucket")  # Default bucket name
+bucket_name = os.getenv("GCS_BUCKET_NAME", "news_audio_bucket")  # Default bucket name
 
 # # Initialize Supabase and OpenAI clients
-# supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # client = OpenAI()
 
 NUMBER_WORDS_HU = {
@@ -114,59 +114,63 @@ def extract_main_content(html: str) -> str:
     text = soup.get_text(separator=' ', strip=True)
     return text
 
-# def process_html_and_publish(page_id: str, html: str):
-#     """Process HTML content and publish cleaned data."""
-#     publisher = pubsub_v1.PublisherClient()
-#     topic_path = publisher.topic_path(GOOGLE_CLOUD_PROJECT, "html-processed")
+def process_html_and_publish(page_id: str, html: str):
+    """Process HTML content, save to Supabase, and publish to Pub/Sub."""
+    publisher = pubsub_v1.PublisherClient()
+    topic_path = publisher.topic_path(GOOGLE_CLOUD_PROJECT, "articles-saved")  # Use the existing topic
 
-#     # Extract and clean HTML content
-#     main_content = extract_main_content(html)
-#     cleaned_text = clean_text(main_content)
+    # Extract and clean HTML content
+    main_content = extract_main_content(html)
+    cleaned_text = clean_text(main_content)
 
-#     # Prepare data for Supabase and Pub/Sub
-#     article_data = {
-#         "page_id": page_id,
-#         "cleaned_content": cleaned_text,
-#         "processed_at": datetime.now().isoformat()
-#     }
+    # Prepare article data
+    article_data = {
+        "id": page_id,  # Use page_id as the article ID
+        "title": f"Test Title for {page_id}",  # Placeholder for title
+        "description": cleaned_text[:100],  # Cleaned content as description
+        "pub_date": datetime.now().isoformat(),  # Placeholder publication date
+        "link": f"https://example.com/articles/{page_id}",  # Placeholder link
+        "category": "Uncategorized"  # Default category
+    }
 
-#     # Save cleaned content to Supabase
-#     response = supabase.table("article").insert(article_data).execute()
-#     if response.error:
-#         logging.error(f"Failed to save article to Supabase: {response.error}")
-#         raise Exception(response.error)
+    # Insert article into Supabase
+    response = supabase.table("article").insert(article_data).execute()
+    if response.error:
+        logging.error(f"Failed to save article to Supabase: {response.error}")
+        raise Exception(response.error)
 
-#     logging.info(f"Cleaned HTML content saved with page ID: {page_id}")
+    logging.info(f"Cleaned HTML content saved with article ID: {page_id}")
 
-#     # Publish cleaned content to Pub/Sub
-#     message = {
-#         "page_id": page_id,
-#         "cleaned_content": cleaned_text
-#     }
-#     future = publisher.publish(topic_path, json.dumps(message).encode("utf-8"))
-#     logging.info(f"Message published to Pub/Sub with ID: {future.result()}")
+    # Publish cleaned content to Pub/Sub
+    message = {
+        "article_id": page_id,          # Use page_id as article_id
+        "title": article_data["title"], # Use test title
+        "description": cleaned_text,    # Cleaned content
+        "pub_date": article_data["pub_date"],  # Use test publication date
+        "link": article_data["link"]    # Placeholder link
+    }
 
-#     return article_data
+    future = publisher.publish(topic_path, json.dumps(message).encode("utf-8"))
+    logging.info(f"Message published to Pub/Sub with ID: {future.result()}")
 
-# def process_html_request(request):
-#     """Entry point for processing HTML requests."""
-#     if request.method != 'POST':
-#         return "Method not allowed", 405
-
-#     try:
-#         data = request.get_json()
-#         page_id = data.get('page_id')
-#         html_content = data.get('html')
-
-#         if not page_id or not html_content:
-#             raise ValueError("Missing required fields: 'page_id' and 'html'.")
-
-#         result = process_html_and_publish(page_id, html_content)
-#         return {"status": "success", "data": result}, 200
-#     except Exception as e:
-#         logging.error(f"Error processing request: {e}")
-#         return {"status": "error", "message": str(e)}, 500
+    return article_data
 
 
-if __name__ == "__main__":
-    print(number_to_hungarian(1236437389212))
+def process_html_request(request):
+    """Entry point for processing HTML requests."""
+    if request.method != 'POST':
+        return "Method not allowed", 405
+
+    try:
+        data = request.get_json()
+        page_id = data.get('page_id')
+        html_content = data.get('html')
+
+        if not page_id or not html_content:
+            raise ValueError("Missing required fields: 'page_id' and 'html'.")
+
+        result = process_html_and_publish(page_id, html_content)
+        return {"status": "success", "data": result}, 200
+    except Exception as e:
+        logging.error(f"Error processing request: {e}")
+        return {"status": "error", "message": str(e)}, 500
