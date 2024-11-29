@@ -12,12 +12,12 @@ from bs4 import BeautifulSoup  # For HTML parsing
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 bucket_name = os.getenv("GCS_BUCKET_NAME", "news_audio_bucket")  # Default bucket name
 
 # Initialize Supabase and OpenAI clients
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-client = OpenAI()
+# client = OpenAI()
 
 NUMBER_WORDS_HU = {
     0: "nulla",
@@ -125,7 +125,7 @@ def process_html_and_publish(page_id: str, html: str):
 
     return article_data
 
-def handle_html_request(request):
+def process_html_request(request):
     """Entry point for processing HTML requests."""
     if request.method != 'POST':
         return "Method not allowed", 405
