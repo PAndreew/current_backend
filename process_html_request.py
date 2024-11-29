@@ -9,14 +9,14 @@ from openai import OpenAI
 from bs4 import BeautifulSoup  # For HTML parsing
 
 # Environment Variables
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT")
-# OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-bucket_name = os.getenv("GCS_BUCKET_NAME", "news_audio_bucket")  # Default bucket name
+# SUPABASE_URL = os.getenv("SUPABASE_URL")
+# SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+# GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT")
+# # OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# bucket_name = os.getenv("GCS_BUCKET_NAME", "news_audio_bucket")  # Default bucket name
 
-# Initialize Supabase and OpenAI clients
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+# # Initialize Supabase and OpenAI clients
+# supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # client = OpenAI()
 
 NUMBER_WORDS_HU = {
@@ -49,19 +49,42 @@ NUMBER_WORDS_HU = {
     80: "nyolcvan",
     90: "kilencven",
     100: "száz",
+    1000: "ezer"
 }
+
+LARGE_UNITS_HU = [
+    (10**12, "billió"),
+    (10**9, "milliárd"),
+    (10**6, "millió"),
+    (10**3, "ezer"),
+]
 
 def number_to_hungarian(num: int) -> str:
     """Convert a number to its Hungarian name."""
-    if num in NUMBER_WORDS_HU:
+    if num == 0:
+        return NUMBER_WORDS_HU[0]
+
+    if num < 20:
         return NUMBER_WORDS_HU[num]
-    elif num < 100:
+
+    if num < 100:
         tens, remainder = divmod(num, 10)
-        return f"{NUMBER_WORDS_HU[tens * 10]}{NUMBER_WORDS_HU[remainder]}"
-    elif num == 100:
-        return NUMBER_WORDS_HU[100]
-    else:
-        return str(num)  # Fallback for numbers not in the dictionary
+        return f"{NUMBER_WORDS_HU[tens * 10]}{NUMBER_WORDS_HU[remainder]}" if remainder else NUMBER_WORDS_HU[tens * 10]
+
+    if num < 1000:
+        hundreds, remainder = divmod(num, 100)
+        prefix = f"{NUMBER_WORDS_HU[hundreds]}{NUMBER_WORDS_HU[100]}" if hundreds > 1 else NUMBER_WORDS_HU[100]
+        return f"{prefix}{number_to_hungarian(remainder)}".strip() if remainder else prefix
+
+    for value, name in LARGE_UNITS_HU:
+        if num >= value:
+            major, remainder = divmod(num, value)
+            major_part = number_to_hungarian(major)
+            remainder_part = f" {number_to_hungarian(remainder)}" if remainder else ""
+            return f"{major_part}{name}{remainder_part}".strip()
+
+    # Fallback for unexpected cases
+    return str(num)
 
 def replace_numbers_with_words(text: str) -> str:
     """Replace numbers in the text with their Hungarian word equivalents."""
@@ -91,55 +114,59 @@ def extract_main_content(html: str) -> str:
     text = soup.get_text(separator=' ', strip=True)
     return text
 
-def process_html_and_publish(page_id: str, html: str):
-    """Process HTML content and publish cleaned data."""
-    publisher = pubsub_v1.PublisherClient()
-    topic_path = publisher.topic_path(GOOGLE_CLOUD_PROJECT, "html-processed")
+# def process_html_and_publish(page_id: str, html: str):
+#     """Process HTML content and publish cleaned data."""
+#     publisher = pubsub_v1.PublisherClient()
+#     topic_path = publisher.topic_path(GOOGLE_CLOUD_PROJECT, "html-processed")
 
-    # Extract and clean HTML content
-    main_content = extract_main_content(html)
-    cleaned_text = clean_text(main_content)
+#     # Extract and clean HTML content
+#     main_content = extract_main_content(html)
+#     cleaned_text = clean_text(main_content)
 
-    # Prepare data for Supabase and Pub/Sub
-    article_data = {
-        "page_id": page_id,
-        "cleaned_content": cleaned_text,
-        "processed_at": datetime.now().isoformat()
-    }
+#     # Prepare data for Supabase and Pub/Sub
+#     article_data = {
+#         "page_id": page_id,
+#         "cleaned_content": cleaned_text,
+#         "processed_at": datetime.now().isoformat()
+#     }
 
-    # Save cleaned content to Supabase
-    response = supabase.table("article").insert(article_data).execute()
-    if response.error:
-        logging.error(f"Failed to save article to Supabase: {response.error}")
-        raise Exception(response.error)
+#     # Save cleaned content to Supabase
+#     response = supabase.table("article").insert(article_data).execute()
+#     if response.error:
+#         logging.error(f"Failed to save article to Supabase: {response.error}")
+#         raise Exception(response.error)
 
-    logging.info(f"Cleaned HTML content saved with page ID: {page_id}")
+#     logging.info(f"Cleaned HTML content saved with page ID: {page_id}")
 
-    # Publish cleaned content to Pub/Sub
-    message = {
-        "page_id": page_id,
-        "cleaned_content": cleaned_text
-    }
-    future = publisher.publish(topic_path, json.dumps(message).encode("utf-8"))
-    logging.info(f"Message published to Pub/Sub with ID: {future.result()}")
+#     # Publish cleaned content to Pub/Sub
+#     message = {
+#         "page_id": page_id,
+#         "cleaned_content": cleaned_text
+#     }
+#     future = publisher.publish(topic_path, json.dumps(message).encode("utf-8"))
+#     logging.info(f"Message published to Pub/Sub with ID: {future.result()}")
 
-    return article_data
+#     return article_data
 
-def process_html_request(request):
-    """Entry point for processing HTML requests."""
-    if request.method != 'POST':
-        return "Method not allowed", 405
+# def process_html_request(request):
+#     """Entry point for processing HTML requests."""
+#     if request.method != 'POST':
+#         return "Method not allowed", 405
 
-    try:
-        data = request.get_json()
-        page_id = data.get('page_id')
-        html_content = data.get('html')
+#     try:
+#         data = request.get_json()
+#         page_id = data.get('page_id')
+#         html_content = data.get('html')
 
-        if not page_id or not html_content:
-            raise ValueError("Missing required fields: 'page_id' and 'html'.")
+#         if not page_id or not html_content:
+#             raise ValueError("Missing required fields: 'page_id' and 'html'.")
 
-        result = process_html_and_publish(page_id, html_content)
-        return {"status": "success", "data": result}, 200
-    except Exception as e:
-        logging.error(f"Error processing request: {e}")
-        return {"status": "error", "message": str(e)}, 500
+#         result = process_html_and_publish(page_id, html_content)
+#         return {"status": "success", "data": result}, 200
+#     except Exception as e:
+#         logging.error(f"Error processing request: {e}")
+#         return {"status": "error", "message": str(e)}, 500
+
+
+if __name__ == "__main__":
+    print(number_to_hungarian(1236437389212))
