@@ -119,42 +119,53 @@ def process_html_and_publish(page_id: str, html: str):
     publisher = pubsub_v1.PublisherClient()
     topic_path = publisher.topic_path(GOOGLE_CLOUD_PROJECT, "articles-saved")  # Use the existing topic
 
-    # Extract and clean HTML content
-    main_content = extract_main_content(html)
-    cleaned_text = clean_text(main_content)
+    try:
+        # Step 1: Extract and clean HTML content
+        logging.info("Extracting and cleaning HTML content.")
+        main_content = extract_main_content(html)
+        cleaned_text = clean_text(main_content)
 
-    # Prepare article data
-    article_data = {
-        "id": page_id,  # Use page_id as the article ID
-        "title": f"Test Title for {page_id}",  # Placeholder for title
-        "description": cleaned_text[:100],  # Cleaned content as description
-        "pub_date": datetime.now().isoformat(),  # Placeholder publication date
-        "link": f"https://example.com/articles/{page_id}",  # Placeholder link
-        "category": "Uncategorized"  # Default category
-    }
+        # Step 2: Prepare article data
+        logging.info("Preparing article data.")
+        article_data = {
+            "id": page_id,  # Use page_id as the article ID
+            "title": f"Test Title for {page_id}",  # Placeholder for title
+            "description": cleaned_text[:100],  # Cleaned content as description
+            "pub_date": datetime.now().isoformat(),  # Placeholder publication date
+            "link": f"https://example.com/articles/{page_id}",  # Placeholder link
+            "category": "Uncategorized"  # Default category
+        }
 
-    # Insert article into Supabase
-    response = supabase.table("article").insert(article_data).execute()
-    if response.error:
-        logging.error(f"Failed to save article to Supabase: {response.error}")
-        raise Exception(response.error)
+        # Step 3: Insert article into Supabase
+        logging.info(f"Inserting article with ID {page_id} into Supabase.")
+        response = supabase.table("article").insert(article_data).execute()
 
-    logging.info(f"Cleaned HTML content saved with article ID: {page_id}")
+        # Check for errors in Supabase response
+        if "error" in response and response["error"]:
+            raise Exception(f"Supabase error: {response['error']}")
 
-    # Publish cleaned content to Pub/Sub
-    message = {
-        "article_id": page_id,          # Use page_id as article_id
-        "title": article_data["title"], # Use test title
-        "description": cleaned_text,    # Cleaned content
-        "pub_date": article_data["pub_date"],  # Use test publication date
-        "link": article_data["link"]    # Placeholder link
-    }
+        logging.info(f"Article successfully saved with ID {page_id}.")
 
-    future = publisher.publish(topic_path, json.dumps(message).encode("utf-8"))
-    logging.info(f"Message published to Pub/Sub with ID: {future.result()}")
+        # Step 4: Publish cleaned content to Pub/Sub
+        logging.info(f"Publishing message for article ID {page_id} to Pub/Sub.")
+        message = {
+            "article_id": str(page_id),
+            "title": article_data["title"],
+            "description": article_data["description"],
+            "pub_date": article_data["pub_date"],
+            "link": article_data["link"]
+        }
 
-    return article_data
+        # Publish the message
+        future = publisher.publish(topic_path, json.dumps(message).encode("utf-8"))
+        pubsub_message_id = future.result()
+        logging.info(f"Message published to Pub/Sub with ID: {pubsub_message_id}")
 
+        return article_data
+
+    except Exception as e:
+        logging.error(f"Error in process_html_and_publish: {e}")
+        raise
 
 def process_html_request(request):
     """Entry point for processing HTML requests."""
