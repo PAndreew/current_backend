@@ -172,7 +172,6 @@ def scrape_and_save_articles(request):
                 "title": entry.title,
                 "description": processed_text, # Still using description for 'short' summary if needed
                 "full_text": translated_text, # Translated full article text (can be None if translation failed)
-                "full_text_original": full_article_text, # Saving original for debugging/fallback
                 "pub_date": pub_date.isoformat(),
                 "link": entry.link,
                 "category": entry.get("category", "Uncategorized")
