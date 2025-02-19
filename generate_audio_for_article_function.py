@@ -21,7 +21,7 @@ bucket_name = os.getenv("GCS_BUCKET_NAME", "news_audio_bucket")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
-audio_ids = ("JBFqnCBsd6RMkjVDRZzb")
+audio_ids = ("lVCldLIMCFckDUbGfwtx", "lVCldLIMCFckDUbGfwtx")
 
 def text_to_speech_stream(text: str) -> BytesIO:
     # Perform the text-to-speech conversion with ElevenLabs
@@ -71,7 +71,7 @@ def generate_audio_for_article(event, context):
         if existing_audio.data:
             logging.info(f"Audio for article ID {article_id} already exists. Skipping generation.")
             return "Audio already exists", 200
-        text_content = f"{article_data['title']}. {article_data['full_text']}"
+        text_content = f"{article_data['full_text']}"
         audio_stream = text_to_speech_stream(text_content)  # Audio generation logic
 
         # Upload audio to GCS
