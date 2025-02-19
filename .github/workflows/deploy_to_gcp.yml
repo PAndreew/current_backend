@@ -1,58 +1,58 @@
-# name: Deploy to Google Cloud Functions
+name: Deploy to Google Cloud Functions
 
-# on:
-#   push:
-#     branches:
-#       - master
+on:
+  push:
+    branches:
+      - master
 
-# jobs:
-#   deploy:
-#     name: Deploy to Google Cloud Functions
-#     runs-on: ubuntu-latest
+jobs:
+  deploy:
+    name: Deploy to Google Cloud Functions
+    runs-on: ubuntu-latest
 
-#     steps:
-#       # Step 1: Checkout the repository
-#       - name: Checkout code
-#         uses: actions/checkout@v2
+    steps:
+      # Step 1: Checkout the repository
+      - name: Checkout code
+        uses: actions/checkout@v2
 
-#       # Step 2: Authenticate with Google Cloud using the service account key
-#       - id: 'auth'
-#         uses: google-github-actions/auth@v2
-#         with:
-#           credentials_json: '${{ secrets.GOOGLE_CREDENTIALS }}'
+      # Step 2: Authenticate with Google Cloud using the service account key
+      - id: 'auth'
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: '${{ secrets.GOOGLE_CREDENTIALS }}'
 
-#       # Step 3: Set up Google Cloud SDK
-#       - name: Set up Google Cloud SDK
-#         uses: google-github-actions/setup-gcloud@v2
-#         with:
-#           project_id: ${{ secrets.GCP_PROJECT_ID }}
+      # Step 3: Set up Google Cloud SDK
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
 
-#       # Step 4: Deploy scrape_and_save_articles function
-#       - name: Deploy scrape_and_save_articles Function
-#         run: |
-#           gcloud functions deploy scrape_and_save_articles \
-#             --runtime python310 \
-#             --trigger-http \
-#             --allow-unauthenticated \
-#             --source . \
-#             --entry-point scrape_and_save_articles
+      # Step 4: Deploy scrape_and_save_articles function
+      - name: Deploy scrape_and_save_articles Function
+        run: |
+          gcloud functions deploy scrape_and_save_articles \
+            --runtime python310 \
+            --trigger-http \
+            --allow-unauthenticated \
+            --source . \
+            --entry-point scrape_and_save_articles
 
-#       # Step 5: Deploy generate_audio_file function
-#       - name: Deploy generate_audio_file Function
-#         run: |
-#           gcloud functions deploy generate_audio_for_article \
-#             --runtime python310 \
-#             --trigger-topic articles-saved \
-#             --allow-unauthenticated \
-#             --source . \
-#             --entry-point generate_audio_for_article
+      # Step 5: Deploy generate_audio_file function
+      - name: Deploy generate_audio_file Function
+        run: |
+          gcloud functions deploy generate_audio_for_article \
+            --runtime python310 \
+            --trigger-topic articles-saved \
+            --allow-unauthenticated \
+            --source . \
+            --entry-point generate_audio_for_article
 
-#       # Step 6: Deploy generate_rss_feed function
-#       - name: Deploy generate_rss_feed Function
-#         run: |
-#           gcloud functions deploy generate_rss_feed \
-#             --runtime python310 \
-#             --trigger-topic audio-generated \
-#             --allow-unauthenticated \
-#             --source . \
-#             --entry-point generate_rss_feed
+      # Step 6: Deploy generate_rss_feed function
+      - name: Deploy generate_rss_feed Function
+        run: |
+          gcloud functions deploy generate_rss_feed \
+            --runtime python310 \
+            --trigger-topic audio-generated \
+            --allow-unauthenticated \
+            --source . \
+            --entry-point generate_rss_feed
