@@ -48,11 +48,11 @@ jobs:
             --entry-point generate_audio_for_article
 
       # Step 6: Deploy generate_rss_feed function
-      - name: Deploy generate_rss_feed Function
-        run: |
-          gcloud functions deploy generate_rss_feed \
-            --runtime python310 \
-            --trigger-topic audio-generated \
-            --allow-unauthenticated \
-            --source . \
-            --entry-point generate_rss_feed
+    #   - name: Deploy generate_rss_feed Function
+    #     run: |
+    #       gcloud functions deploy generate_rss_feed \
+    #         --runtime python310 \
+    #         --trigger-topic audio-generated \
+    #         --allow-unauthenticated \
+    #         --source . \
+    #         --entry-point generate_rss_feed
