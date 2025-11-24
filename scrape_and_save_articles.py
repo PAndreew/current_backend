@@ -1,185 +1,173 @@
-import feedparser
 import logging
 import os
 import re
-import requests
-from bs4 import BeautifulSoup
-from datetime import datetime
-from dateutil import parser as date_parser
-from datetime import datetime
-import logging
+from datetime import datetime, timedelta
+import json
+
 from supabase import create_client, Client
 from google.cloud import pubsub_v1
-import google.generativeai as genai
-import json
-from openai import OpenAI
+from perplexity import Perplexity
+# from dotenv import load_dotenv
+from num2words import num2words
+from dateutil import parser as date_parser
 
+# Load environment variables from .env file
+# load_dotenv()
+
+# --- Configuration ---
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT")
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-bucket_name = os.getenv("GCS_BUCKET_NAME", "news_audio_bucket")  # Default if not set
-url = os.getenv("AUDIO_GENERATION_FUNCTION_URL")
+PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
 
+# Initialize Supabase client
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Gemini Pro API setup
-GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
-genai.configure(api_key=GOOGLE_API_KEY)
-generation_config = genai.GenerationConfig(
-    temperature=0.2,
-    top_p=1,
-    top_k=30,
-    max_output_tokens=2048,
-)
-safety_settings = [
-    {
-        "category": "HARM_CATEGORY_HARASSMENT",
-        "threshold": "BLOCK_MEDIUM_AND_ABOVE",
-    },
-    {
-        "category": "HARM_CATEGORY_HATE_SPEECH",
-        "threshold": "BLOCK_MEDIUM_AND_ABOVE",
-    },
-    {
-        "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-        "threshold": "BLOCK_MEDIUM_AND_ABOVE",
-    },
-    {
-        "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-        "threshold": "BLOCK_MEDIUM_AND_ABOVE",
-    },
-]
-model = genai.GenerativeModel(model_name="gemini-2.0-flash",
-                              generation_config=generation_config,
-                              safety_settings=safety_settings)
+# Initialize Perplexity client
+client = Perplexity(api_key=PERPLEXITY_API_KEY)
 
-# List of RSS Feeds
-RSS_FEEDS = [
-    "https://konteo.blogrepublik.eu/feed/"
+# --- News Categories ---
+NEWS_CATEGORIES = [
+    "finance", "sports", "technology", "politics", "world news",
+    "entertainment", "health", "science", "business", "lifestyle"
 ]
 
-def remove_html_tags(input_string):
+def convert_numbers_to_words_hu(text):
     """
-    Remove HTML tags from the given string.
-    
-    Args:
-        input_string (str): The string containing HTML tags.
-        
-    Returns:
-        str: The string with HTML tags removed.
+    Finds numbers in a Hungarian text and converts them to words.
     """
-    # Regular expression to match HTML tags
-    clean_text = re.sub(r'<[^>]+>', '', input_string)
-    return clean_text
-
-def parse_pub_date(entry) -> datetime:
-    """Parse the published date from an RSS entry."""
-    if 'published_parsed' in entry:
-        return datetime(*entry.published_parsed[:6])
-    elif 'published' in entry:
-        try:
-            return date_parser.parse(entry.published)
-        except (ValueError, TypeError) as e:
-            logging.warning(f"Failed to parse date '{entry.published}': {e}")
-    # Default to the current time if parsing fails or date is missing
-    return datetime.now()
-
-def scrape_full_article(article_url):
-    """Scrapes the full article text from a given URL, looking for 'posztkenyerszoveg' class."""
-    try:
-        response = requests.get(article_url, timeout=10) # Added timeout
-        response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
-        soup = BeautifulSoup(response.content, 'html.parser')
-        article_div = soup.find('div', class_='posztkenyerszoveg')
-        if article_div:
-            article_text = article_div.get_text(separator='\n', strip=True) # Using separator and strip for cleaner text
-            return article_text
-        else:
-            logging.warning(f"Div with class 'posztkenyerszoveg' not found on: {article_url}")
-            return None
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Error scraping URL {article_url}: {e}")
-        return None
-
-def translate_text_with_gemini(text, target_language='english'):
-    """Translates text to English using Gemini Pro."""
     if not text:
-        return None  # Or empty string, depending on how you want to handle empty input
+        return text
+    number_pattern = re.compile(r'\b\d+,\d+\b|\b\d+\b')
 
+    def replace_with_words(match):
+        number_str = match.group(0)
+        try:
+            number_val = float(number_str.replace(',', '.')) if ',' in number_str else int(number_str)
+            return num2words(number_val, lang='hu')
+        except (ValueError, TypeError):
+            return number_str
+    return number_pattern.sub(replace_with_words, text)
+
+def get_perplexity_completion(prompt, search_after_date_filter=None):
+    """
+    Gets the full completion response from the Perplexity API.
+    """
     try:
-        prompt = f"Translate the following text to {target_language}: {text}" # More explicit prompt
-        response = model.generate_content([prompt])
-        if response.text:
-            return response.text
-        elif response.candidates and response.candidates[0].content.parts: # Handling cases with candidates
-            return "".join([part.text for part in response.candidates[0].content.parts if hasattr(part, 'text')])
-        else:
-            logging.warning(f"Gemini Pro translation failed, empty response for text: {text[:100]}...") # Log first 100 chars
-            return None
-    except Exception as e: # Catch broader exceptions for Gemini errors
-        logging.error(f"Gemini Pro translation error: {e}")
+        messages = [{"role": "user", "content": prompt}]
+        completion = client.chat.completions.create(
+            model="sonar",
+            messages=messages,
+            search_after_date_filter=search_after_date_filter
+        )
+        return completion
+    except Exception as e:
+        logging.error(f"Error calling Perplexity API: {e}")
         return None
+
+def parse_article_date(date_string):
+    """Safely parses a date string and returns an ISO format string."""
+    try:
+        dt = date_parser.parse(date_string)
+        return dt.isoformat()
+    except (ValueError, TypeError):
+        logging.warning(f"Could not parse date '{date_string}'. Defaulting to now.")
+        return datetime.now().isoformat()
 
 def scrape_and_save_articles(request):
+    """
+    Cloud Function entry point that generates summaries and publishes a
+    message with the correct schema to Pub/Sub.
+    """
     publisher = pubsub_v1.PublisherClient()
-    topic_path = publisher.topic_path("currentlyai", "articles-saved")
+    topic_path = publisher.topic_path(GOOGLE_CLOUD_PROJECT, "articles-saved")
+    two_hours_ago = datetime.now() - timedelta(hours=2)
+    date_filter = two_hours_ago.strftime("%m/%d/%Y")
+    processed_urls = set()
 
-    for url in RSS_FEEDS:
-        logging.info(f"Scraping RSS feed: {url}")
-        feed = feedparser.parse(url)
+    for category in NEWS_CATEGORIES:
+        logging.info(f"--- Generating summary for category: {category.upper()} ---")
+        category_prompt = f"Summarize the most important Hungarian news in the '{category}' category from the last 2 hours. The summary should be in Hungarian and about 100 words long. Include multiple sources."
+        
+        category_completion = get_perplexity_completion(category_prompt, search_after_date_filter=date_filter)
 
-        for entry in feed.entries[:1]: # Limiting to first article for testing, remove [:1] for all
-            # Check if article exists
-            response = supabase.table("article").select("*").eq("link", entry.link).execute()
+        if not category_completion or not category_completion.search_results:
+            logging.warning(f"Could not get a summary or search results for '{category}'. Skipping.")
+            continue
+
+        logging.info(f"Category '{category}' summary generated with {len(category_completion.search_results)} sources.")
+
+        for article_info in category_completion.search_results:
+            url = article_info.url
+            if not url or url in processed_urls:
+                continue
+            
+            response = supabase.table("article").select("id").eq("link", url).execute()
             if response.data:
-                logging.info(f"Article already exists in database: {entry.title}")
+                logging.info(f"Article from this URL already exists: {url}")
+                processed_urls.add(url)
                 continue
 
-            # Scrape full article text
-            full_article_text = scrape_full_article(entry.link)
+            logging.info(f"Generating detailed summary for article: {url}")
+            
+            article_prompt = f"Summarize the article from this URL in Hungarian, using about 70-100 words: {url}. Please provide a suitable title for the summary based on the article's content."
+            article_completion = get_perplexity_completion(article_prompt)
 
-            # Translate full article text
-            translated_text = None
-            if full_article_text:
-                translated_text = translate_text_with_gemini(full_article_text)
-                if translated_text:
-                    logging.info(f"Article translated successfully: {entry.title}")
-                else:
-                    logging.warning(f"Translation failed for article: {entry.title}, using original description.")
-                    translated_text = "Translation failed. Original Hungarian text may be available in 'full_text_original' field." # Fallback message
-            else:
-                logging.warning(f"Full article scraping failed for: {entry.title}, using original description.")
+            if not article_completion or not article_completion.choices:
+                logging.warning(f"Failed to get a detailed summary for article: {url}")
+                continue
+            
+            snippet_text = article_info.snippet if article_info.snippet else ''
+            description_with_words = convert_numbers_to_words_hu(snippet_text)
 
+            detailed_summary = article_completion.choices[0].message.content
+            full_text_with_words = convert_numbers_to_words_hu(detailed_summary)
+            
+            title_match = re.match(r"^\s*#*\s*([^#\n\r]+)", detailed_summary)
+            final_title = title_match.group(1).strip() if title_match else article_info.title
+            
+            publication_date_iso = parse_article_date(article_info.date)
 
-            # Process and save new article
-            pub_date = parse_pub_date(entry)
-            text_without_tags = remove_html_tags(entry.description)
-
-            article_data = {
-                "title": entry.title,
-                "description": text_without_tags, # Still using description for 'short' summary if needed
-                "full_text": translated_text, # Translated full article text (can be None if translation failed)
-                "pub_date": pub_date.isoformat(),
-                "link": entry.link,
-                "category": entry.get("category", "Uncategorized")
+            db_record = {
+                "title": final_title,
+                "description": description_with_words,
+                "full_text": full_text_with_words,
+                "pub_date": publication_date_iso,
+                "link": url,
+                "category": category
             }
-            insert_response = supabase.table("article").insert(article_data).execute()
+
+            insert_response = supabase.table("article").insert(db_record).execute()
+            if not insert_response.data:
+                logging.error(f"Failed to insert article into Supabase for URL: {url}")
+                continue
+            
             article_id = insert_response.data[0]['id']
+            logging.info(f"New article saved with ID {article_id}: {final_title}")
 
-            logging.info(f"New article saved with ID {article_id}: {entry.title}")
-
-            # Publish to Pub/Sub for audio generation (including full_text)
-            article_message = {
+            # --- CORRECTED PUBSUB MESSAGE ---
+            # This dictionary now includes the 'description' field and matches the required schema.
+            pubsub_message = {
                 "article_id": str(article_id),
-                "title": str(entry.title),
-                "description": str(text_without_tags),
-                "full_text": str(translated_text) if translated_text else "Translation failed", # Include translated text in message
-                "pub_date": pub_date.isoformat(),
-                "link": str(entry.link)
+                "title": str(final_title),
+                "description": str(description_with_words),
+                "full_text": str(full_text_with_words),
+                "pub_date": publication_date_iso,
+                "link": str(url)
             }
-            future = publisher.publish(topic_path, json.dumps(article_message).encode("utf-8"))
-            print(f"Message id: {future.result()}")
+            # --- END CORRECTION ---
+            
+            future = publisher.publish(topic_path, json.dumps(pubsub_message).encode("utf-8"))
+            try:
+                message_id = future.result()
+                logging.info(f"Message {message_id} published for article ID {article_id}.")
+            except Exception as e:
+                logging.error(f"Failed to publish message for article ID {article_id}: {e}")
 
-    return "RSS scraping and saving complete", 200
+            processed_urls.add(url)
+
+    return "News summary generation and saving complete.", 200
+
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
+    scrape_and_save_articles(None)
